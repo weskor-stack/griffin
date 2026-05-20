@@ -1,0 +1,3 @@
+[Machine]
+#SAVE = KP
+STATUS = AUTOKPLK

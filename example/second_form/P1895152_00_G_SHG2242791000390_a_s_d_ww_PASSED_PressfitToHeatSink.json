@@ -1,0 +1,71 @@
+{
+    "flowname": "Sanmina-Automatyco-",
+    "metadata": "",
+    "sitecode": "HG2",
+    "taskname": "PressfitToHeatSink",
+    "actorname": "AUTOMATY-GEL97R",
+    "thingname": "P1895152-00-G:SHG2242791000390",
+    "parameters": [
+        {
+            "name": "Pressfit to heat sink 1 Force Test",
+            "type": "Numeric",
+            "units": "N",
+            "value": 100,
+            "result": "PASSED",
+            "metadata": "",
+            "test_time": "2025-03-14T17:00:33Z 06:00",
+            "lowerlimit": 102,
+            "upperlimit": 104,
+            "description": "Pressfit to heat sink 1 Force Test",
+            "compoperator": "GELE"
+        },
+        {
+            "name": "Distance Test",
+            "type": "Numeric",
+            "units": "mm",
+            "value": 30,
+            "result": "PASSED",
+            "metadata": "",
+            "test_time": "2025-03-14T17:00:33Z 06:00",
+            "lowerlimit": 28,
+            "upperlimit": 35,
+            "description": "Distance Test",
+            "compoperator": "GELE"
+        },
+        {
+            "name": "Speed Test",
+            "type": "Numeric",
+            "units": "rev/min",
+            "value": 102,
+            "result": "PASSED",
+            "metadata": "",
+            "test_time": "2025-03-14T17:00:33Z 06:00",
+            "lowerlimit": 100,
+            "upperlimit": 104,
+            "description": "Speed Test",
+            "compoperator": "GELE"
+        },
+        {
+            "name": "Servo current Test",
+            "type": "Numeric",
+            "units": "A",
+            "value": 1.2,
+            "result": "PASSED",
+            "metadata": "Success!!",
+            "test_time": "2025-03-14T17:00:33Z 06:00",
+            "lowerlimit": 1.0,
+            "upperlimit": 1.5,
+            "description": "Servo current Test",
+            "compoperator": "GELE"
+        }
+    ],
+    "partnumber": "1895152-00-G",
+    "taskresult": "PASSED",
+    "processname": "",
+    "actorversion": "v1.0.0",
+    "flowstepname": "PressfitToHeatSink",
+    "taskduration": 2,
+    "actorlocation": "Sanmina Guadalajara Plant 2: Sanmina Guadalajara Plant 2",
+    "tasktimestamp": "2025-03-14T17:00:33Z 06:00",
+    "taskcollectionname": ""
+}

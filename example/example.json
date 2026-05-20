@@ -1,0 +1,77 @@
+{
+    "thingtaskdata": [
+        {
+            "taskname": "PressfitToHeatSink",
+            "actorname": "AUTOMATY-GEL97R",
+            "processname": "",
+            "sitecode": "HG2",
+            "flowname": "San Mina",
+            "taskcollectionname": "",
+            "tasktimestamp": "2025-02-20T17:51:29Z 06:00",
+            "actorversion": "v1.0.0",
+            "actorlocation": "AMC - Guadalajara",
+            "flowstepname": "San Mina",
+            "thingname": "P1895152-00-G:SHG2242791000290",
+            "taskresult": "Failed",
+            "partnumber": "1895152-00-G",
+            "taskduration": 2,
+            "parameters": [
+                {
+                    "name": "Pressfit to heat sink 1 Force Test",
+                    "description": "Pressfit to heat sink 1 Force Test",
+                    "value": 100,
+                    "lowerlimit": 102,
+                    "upperlimit": 104,
+                    "type": "Numeric",
+                    "units": "N",
+                    "result": "Failed",
+                    "compoperator": "GELE",
+                    "test_time": "2025-02-20T17:51:29Z 06:00",
+                    "metadata": ""
+                },
+                {
+                    "name": "Distance Test",
+                    "description": "Distance Test",
+                    "value": 30,
+                    "lowerlimit": 28,
+                    "upperlimit": 35,
+                    "type": "Numeric",
+                    "units": "mm",
+                    "result": "Passed",
+                    "compoperator": "GELE",
+                    "test_time": "2025-02-20T17:51:29Z 06:00",
+                    "metadata": ""
+                },
+                {
+                    "name": "Speed Test",
+                    "description": "Speed Test",
+                    "value": 102,
+                    "lowerlimit": 100,
+                    "upperlimit": 104,
+                    "type": "Numeric",
+                    "units": "rev/min",
+                    "result": "Passed",
+                    "compoperator": "GELE",
+                    "test_time": "2025-02-20T17:51:29Z 06:00",
+                    "metadata": ""
+                },
+                {
+                    "name": "Servo current Test",
+                    "description": "Servo current Test",
+                    "value": 1.2,
+                    "lowerlimit": 1.0,
+                    "upperlimit": 1.5,
+                    "type": "Numeric",
+                    "units": "A",
+                    "result": "Passed",
+                    "compoperator": "GELE",
+                    "test_time": "2025-02-20T17:51:29Z 06:00",
+                    "metadata": "Success!!"
+                }
+            ],
+            "metadata": "",
+            "error": "",
+            "ncdimensiondetails": ""
+        }
+    ]
+}
