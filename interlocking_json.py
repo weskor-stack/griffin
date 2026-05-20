@@ -2,7 +2,7 @@ import json
 import conexion
 import leer_shop_order
 
-def interlocking_station_10():
+def interlocking_station_20():
     unit_information = []
     configurador = conexion.configurador()
     machine_id = configurador[0]
