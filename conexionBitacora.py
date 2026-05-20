@@ -19,7 +19,7 @@ try:
         password="u8ch9Xn4Ol8woLw3E2A6",
         host="127.0.0.1",
         port=3306,
-        database="data_tracking_qwert_bitacora"
+        database="data_tracking_griffin_bitacora"
 
     )    
     

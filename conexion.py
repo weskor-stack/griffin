@@ -17,7 +17,7 @@ try:
         password="u8ch9Xn4Ol8woLw3E2A6",
         host="127.0.0.1",
         port=3306,
-        database="data_tracking_qwert")
+        database="data_tracking_griffin")
 
 except mariadb.Error as e:
     # print(f"Error connecting to MariaDB Platform: {e}")
@@ -63,7 +63,7 @@ def get_connection():
         password="u8ch9Xn4Ol8woLw3E2A6",
         host="127.0.0.1",
         port=3306,
-        database="data_tracking_qwert"
+        database="data_tracking_griffin"
     )
 
 def select_api_configs():
@@ -441,7 +441,7 @@ def stations():
     with conn.cursor() as cur:
         cur.execute('''SELECT station_id, station_key, station_name, status_id, type_station.ts_id, type_station.ts_name AS Name 
                        FROM station 
-                       INNER JOIN data_tracking_qwert.type_station ON type_station.ts_id = station.ts_id
+                       INNER JOIN data_tracking_griffin.type_station ON type_station.ts_id = station.ts_id
                        WHERE status_id = 1''')
         result = cur.fetchone()  #
     return result
@@ -457,7 +457,7 @@ def parameters_pressfit(element, name_piece):
 
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT pressfit_measurement_id, name FROM data_tracking_qwert.pressfit_measurement WHERE `key` = %s",
+            "SELECT pressfit_measurement_id, name FROM data_tracking_griffin.pressfit_measurement WHERE `key` = %s",
             (element[0],)
         )
         measurement = cur.fetchone()
@@ -467,7 +467,7 @@ def parameters_pressfit(element, name_piece):
         cur.execute('''
             SELECT station_id, station_key, station_name 
             FROM station
-            INNER JOIN data_tracking_qwert.type_station ON type_station.ts_id = station.ts_id
+            INNER JOIN data_tracking_griffin.type_station ON type_station.ts_id = station.ts_id
             WHERE status_id = 1
             LIMIT 1
         ''')
@@ -694,7 +694,7 @@ def parameters_inspection_xt(element, name_piece):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT inspection_measurement_id, name 
-            FROM data_tracking_qwert.inspection_measurement 
+            FROM data_tracking_griffin.inspection_measurement 
             WHERE inspection_measurement.key = ?
         """, (element[0],))
         measurement = cursor.fetchone()
@@ -709,7 +709,7 @@ def parameters_inspection_xt(element, name_piece):
         cursor.execute("""
             SELECT station_id, station_key, station_name 
             FROM station 
-            INNER JOIN data_tracking_qwert.type_station ON type_station.ts_id = station.ts_id
+            INNER JOIN data_tracking_griffin.type_station ON type_station.ts_id = station.ts_id
             WHERE status_id = 1
         """)
         station = cursor.fetchone()
@@ -786,7 +786,7 @@ def parameters_electrical(element, name_piece):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT electrical_measurement_id, name 
-            FROM data_tracking_qwert.electrical_measurement 
+            FROM data_tracking_griffin.electrical_measurement 
             WHERE electrical_measurement.key = ?
         """, (element[0],))
         measurement = cursor.fetchone()
@@ -801,7 +801,7 @@ def parameters_electrical(element, name_piece):
         cursor.execute("""
             SELECT station_id, station_name 
             FROM station 
-            INNER JOIN data_tracking_qwert.type_station ON type_station.ts_id = station.ts_id
+            INNER JOIN data_tracking_griffin.type_station ON type_station.ts_id = station.ts_id
             WHERE station.status_id = 1
             LIMIT 1
         """)
@@ -875,7 +875,7 @@ def duration(element, name_piece):
         # Obtener estación activa
         with conn.cursor() as cursor:
             cursor.execute('''SELECT station_id FROM station 
-                              INNER JOIN data_tracking_qwert.type_station ON type_station.ts_id = station.ts_id
+                              INNER JOIN data_tracking_griffin.type_station ON type_station.ts_id = station.ts_id
                               WHERE status_id = 1 LIMIT 1''')
             station = cursor.fetchone()
             if not station:
@@ -978,7 +978,7 @@ def inspection_data(part_id):
                             ORDER BY test_time DESC
                         ) AS rn
                     FROM parameters_inspection 
-                    INNER JOIN data_tracking_qwert.inspection_measurement 
+                    INNER JOIN data_tracking_griffin.inspection_measurement 
                         ON inspection_measurement.inspection_measurement_id = parameters_inspection.inspection_measurement_id
                     WHERE part_id = %s
                 ) t
@@ -1010,7 +1010,7 @@ def screwing_data(part_id):
                     description, 
                     screwing_measurement.name 
                 FROM parameters_screwing 
-                INNER JOIN data_tracking_qwert.screwing_measurement 
+                INNER JOIN data_tracking_griffin.screwing_measurement 
                     ON screwing_measurement.screwing_measurement_id = parameters_screwing.screwing_measurement_id
                 WHERE part_id = %s
                 ORDER BY parameters_screwing_id ASC
@@ -1040,7 +1040,7 @@ def pressfit_data(part_id):
                     pressfit_measurement.name, 
                     dwell_time 
                 FROM parameters_pressfit 
-                INNER JOIN data_tracking_qwert.pressfit_measurement 
+                INNER JOIN data_tracking_griffin.pressfit_measurement 
                     ON pressfit_measurement.pressfit_measurement_id = parameters_pressfit.pressfit_measurement_id
                 WHERE part_id = %s
                 ORDER BY parameters_pressfit_id ASC
@@ -1069,7 +1069,7 @@ def electrical_data(part_id):
                     description, 
                     electrical_measurement.name 
                 FROM parameters_electrical
-                INNER JOIN data_tracking_qwert.electrical_measurement 
+                INNER JOIN data_tracking_griffin.electrical_measurement 
                     ON electrical_measurement.electrical_measurement_id = parameters_electrical.electrical_measurement_id
                 WHERE part_id = %s
                 ORDER BY parameters_electrical_id DESC
@@ -1255,7 +1255,7 @@ def screwing_data3(part_id, limite):
                     description, 
                     screwing_measurement.name 
                 FROM parameters_screwing 
-                INNER JOIN data_tracking_qwert.screwing_measurement 
+                INNER JOIN data_tracking_griffin.screwing_measurement 
                     ON screwing_measurement.screwing_measurement_id = parameters_screwing.screwing_measurement_id
                 WHERE part_id = %s
                 ORDER BY screwing_measurement_id DESC
@@ -1285,7 +1285,7 @@ def pressfit_data3(part_id,limite):
                     pressfit_measurement.name, 
                     dwell_time 
                 FROM parameters_pressfit 
-                INNER JOIN data_tracking_qwert.pressfit_measurement 
+                INNER JOIN data_tracking_griffin.pressfit_measurement 
                     ON pressfit_measurement.pressfit_measurement_id = parameters_pressfit.pressfit_measurement_id
                 WHERE part_id = %s
                 ORDER BY pressfit_measurement_id DESC
@@ -1314,7 +1314,7 @@ def inspection_data3(part_id):
                     description, 
                     inspection_measurement.name 
                 FROM parameters_inspection 
-                INNER JOIN data_tracking_qwert.inspection_measurement 
+                INNER JOIN data_tracking_griffin.inspection_measurement 
                     ON inspection_measurement.inspection_measurement_id = parameters_inspection.inspection_measurement_id
                 WHERE part_id = %s
                 ORDER BY parameters_inspection_id ASC
@@ -1342,7 +1342,7 @@ def electrical_data3(part_id,limite):
                     description, 
                     electrical_measurement.name 
                 FROM parameters_electrical
-                INNER JOIN data_tracking_qwert.electrical_measurement 
+                INNER JOIN data_tracking_griffin.electrical_measurement 
                     ON electrical_measurement.electrical_measurement_id = parameters_electrical.electrical_measurement_id
                 WHERE part_id = %s
                 ORDER BY electrical_measurement_id DESC
@@ -1477,7 +1477,7 @@ def inspection_data2(part_id):
     try:
         inspectionJson = conn.cursor()
         inspectionJson.execute('''SELECT inspection_measurement.name, value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, parameters_inspection.inspection_measurement_id FROM parameters_inspection 
-                            inner JOIN data_tracking_qwert.inspection_measurement ON inspection_measurement.inspection_measurement_id = parameters_inspection.inspection_measurement_id
+                            inner JOIN data_tracking_griffin.inspection_measurement ON inspection_measurement.inspection_measurement_id = parameters_inspection.inspection_measurement_id
                             WHERE part_id = '''+"'"+str(part_id)+"' ORDER BY parameters_inspection_id DESC LIMIT 4")
         results =inspectionJson.fetchall()
         for x in results:
@@ -1497,7 +1497,7 @@ def screwing_data2(part_id):
     try:
         screwingJson = conn.cursor()
         screwingJson.execute('''SELECT screwing_measurement.name, value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, parameters_screwing.screwing_measurement_id FROM parameters_screwing 
-                            inner JOIN data_tracking_qwert.screwing_measurement ON screwing_measurement.screwing_measurement_id = parameters_screwing.screwing_measurement_id
+                            inner JOIN data_tracking_griffin.screwing_measurement ON screwing_measurement.screwing_measurement_id = parameters_screwing.screwing_measurement_id
                             WHERE part_id = '''+"'"+str(part_id)+"' ORDER BY parameters_screwing_id DESC LIMIT 4")
         results =screwingJson.fetchall()
         for x in results:
@@ -1516,7 +1516,7 @@ def pressfit_data2(part_id):
     try:
         pressfitJson = conn.cursor()
         pressfitJson.execute('''SELECT pressfit_measurement.name, value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, parameters_pressfit.pressfit_measurement_id FROM parameters_pressfit 
-                            inner JOIN data_tracking_qwert.pressfit_measurement ON pressfit_measurement.pressfit_measurement_id = parameters_pressfit.pressfit_measurement_id
+                            inner JOIN data_tracking_griffin.pressfit_measurement ON pressfit_measurement.pressfit_measurement_id = parameters_pressfit.pressfit_measurement_id
                             WHERE part_id = '''+"'"+str(part_id)+"' ORDER BY parameters_pressfit_id DESC LIMIT 4")
         results =pressfitJson.fetchall()
         for x in results:
@@ -1536,7 +1536,7 @@ def electrical_data2(part_id):
     try:
         electricalJson = conn.cursor()
         electricalJson.execute('''SELECT electrical_measurement.name, value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, parameters_electrical.electrical_measurement_id FROM parameters_electrical 
-                            inner JOIN data_tracking_qwert.electrical_measurement ON electrical_measurement.electrical_measurement_id = parameters_electrical.electrical_measurement_id
+                            inner JOIN data_tracking_griffin.electrical_measurement ON electrical_measurement.electrical_measurement_id = parameters_electrical.electrical_measurement_id
                             WHERE part_id = '''+"'"+str(part_id)+"' ORDER BY parameters_electrical_id DESC LIMIT 7")
         results =electricalJson.fetchall()
         for x in results:
@@ -1599,7 +1599,7 @@ def parameters_continuity(element):
             cursor.execute('''
                 SELECT station_id 
                 FROM station 
-                INNER JOIN data_tracking_qwert.type_station 
+                INNER JOIN data_tracking_griffin.type_station 
                     ON type_station.ts_id = station.ts_id
                 WHERE station.status_id = 1
                 LIMIT 1
@@ -1679,7 +1679,7 @@ def parameters_leak(element):
             cursor.execute('''
                 SELECT station_id 
                 FROM station 
-                INNER JOIN data_tracking_qwert.type_station 
+                INNER JOIN data_tracking_griffin.type_station 
                     ON type_station.ts_id = station.ts_id
                 WHERE station.status_id = 1
                 LIMIT 1
@@ -1751,7 +1751,7 @@ def parameters_temperature(element):
             cursor.execute('''
                 SELECT station_id 
                 FROM station 
-                INNER JOIN data_tracking_qwert.type_station 
+                INNER JOIN data_tracking_griffin.type_station 
                     ON type_station.ts_id = station.ts_id
                 WHERE station.status_id = 1
                 LIMIT 1
@@ -1823,7 +1823,7 @@ def parameters_welding(element):
             cursor.execute('''
                 SELECT station_id 
                 FROM station 
-                INNER JOIN data_tracking_qwert.type_station 
+                INNER JOIN data_tracking_griffin.type_station 
                     ON type_station.ts_id = station.ts_id
                 WHERE station.status_id = 1
                 LIMIT 1
