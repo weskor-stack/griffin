@@ -2402,7 +2402,7 @@ def configurador():
     
     # Obtener configuración actual
     cursor = conn.cursor()
-    cursor.execute("SELECT machine_id, process_name, operator, station, product, shop_order FROM configurador")
+    cursor.execute("SELECT machine_id, process_name, operator, station, program_name_version, qty_components,client_id,password  FROM configurador")
     configurador = cursor.fetchone()
     cursor.close()
 
@@ -2582,6 +2582,20 @@ def multiplo_series():
     except Exception as e:
         print("[ERROR] No se encontraron atributos.")
         return 0
+################################################################# Conduit ST20 ###########################################################################
+
+
+def get_expiration_time():
+    """Obtiene todos los registros de la tabla expiration_time para construir los commands del Conduit."""
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT process_name, defect_code, minute_duration, move_loc FROM expiration_time")
+            results = cursor.fetchall()
+        return results  # lista de (process_name, defect_code, minute_duration, move_loc)
+    except Exception as e:
+        print(f"[ERROR] get_expiration_time: {e}")
+        return []
+
 ############################################################################################################################################################
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
