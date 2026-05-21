@@ -5,7 +5,7 @@ import rfc3339
 import leer_shop_order
 from dateutil import parser
 
-def traceability_station_10(serial_number):
+def traceability_station_20(serial_number):
     unit_information = []
     configurador = conexion.configurador()
     pruebas = conexion.type_test()
@@ -73,7 +73,7 @@ def traceability_station_10(serial_number):
             }
         ])
     
-    traceability_station10_send = {
+    traceability_station20_send = {
         "commands": unit_information,
         "serial": serial_number,
         "test_id": pruebas[0][1],
@@ -86,8 +86,8 @@ def traceability_station_10(serial_number):
         "process_name": process_name, #process_name_shop_order,
         "status": duration[0]
     }
-    # print(json.dumps(traceability_station10_send, indent=4))
-    return traceability_station10_send
+    # print(json.dumps(traceability_station20_send, indent=4))
+    return traceability_station20_send
 
 def traceability_station_20(serial_number):
     unit_information = []

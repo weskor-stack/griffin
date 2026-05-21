@@ -37,7 +37,6 @@ def obtener_datos_fila_unica():
         return None
     
 # def insert_simple(machine, process, operator, station):
-
 #URLs
 def get_station():
     try:
@@ -2564,6 +2563,35 @@ def get_expiration_time():
         print(f"[ERROR] get_expiration_time: {e}")
         return []
 
+
+#Expiration time:
+def obtener_datos_expiration():
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM configurador")
+        row_config = cursor.fetchone()
+
+        cursor.execute("SELECT * FROM expiration_time")
+        row_expiration = cursor.fetchone()
+
+        if row_config and row_expiration:
+            datos = {
+                "workStation_ID": row_config[8],              # De configurador
+                "Client_id": row_config[5],                   # De configurador
+                "operator_id": row_config[6],                 # De configurador
+                "process_name_expiration": row_expiration[1], 
+                "time_defect_code_1": row_expiration[2],      # De expiration_time
+                "minute_duration_1": row_expiration[3],       # De expiration_time
+                "move_to_loc_1": row_expiration[4]            # De expiration_time
+            }
+            return datos
+        else:
+            print("No se encontraron datos en configurador o expiration_time.")
+            return None
+    except Exception as e:
+        print(f"Error al consultar base de datos en obtener_datos_expiration: {e}")
+        return None
+    
 ############################################################################################################################################################
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
