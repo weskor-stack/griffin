@@ -14,7 +14,7 @@ def generar_json_expiration(parent_serial_number):
         "refresh_unit": True,
         "source": {
             "workstation": {
-                "station": datos_bd["workStation_ID"],
+                "station": datos_bd["workStation_ID"],  # <-- Aquí toma "ST30_LASER"
                 "type": "Location"
             },
             "client_id": datos_bd["Client_id"],
@@ -29,7 +29,7 @@ def generar_json_expiration(parent_serial_number):
                 "commands": [
                     {
                         "name": "RejectIfTimeExpired",
-                        "workstation": datos_bd["dispensing_process_name_1"],
+                        "workstation": datos_bd["workStation_ID"], 
                         "defect_code": datos_bd["time_defect_code_1"],
                         "minute_duration": datos_bd["minute_duration_1"],
                         "move_to_loc": datos_bd["move_to_loc_1"]
@@ -39,7 +39,6 @@ def generar_json_expiration(parent_serial_number):
         ]
     }
     return estructura_json
-
 def enviar_datos_api(payload, url_destino):
     """
     Función encargada exclusivamente de manejar la petición POST.
