@@ -2577,13 +2577,13 @@ def obtener_datos_expiration():
 
         if row_config and row_expiration:            
             datos = {
-                "workStation_ID": row_config[9],              # station
-                "Client_id": row_config[6],                   # client_id
-                "operator_id": row_config[7],                 # operator
-                "dispensing_process_name_1": row_config[4],   # process name
-                "time_defect_code_1": row_expiration[3],      # defect_code
-                "minute_duration_1": row_expiration[4],       # minute_duration
-                "move_to_loc_1": row_expiration[5]            # move_loc
+                "workStation_ID": row_config[8],              # station
+                "Client_id": row_config[5],                   # client_id
+                "operator_id": row_config[6],                 # operator
+                "dispensing_process_name_1": row_config[3],   # process name
+                "time_defect_code_1": row_expiration[2],      # defect_code
+                "minute_duration_1": row_expiration[3],       # minute_duration
+                "move_to_loc_1": row_expiration[4]            # move_loc
             }
             return datos
         else:
