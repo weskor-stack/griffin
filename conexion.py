@@ -2593,6 +2593,65 @@ def obtener_datos_expiration():
         return None
     
 ############################################################################################################################################################
+
+def get_expiration_time():
+    """Obtiene todos los registros de expiration_time para construir los commands del Conduit."""
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT process_name, defect_code, minute_duration, move_loc FROM expiration_time")
+            results = cursor.fetchall()
+        return results  # lista de (process_name, defect_code, minute_duration, move_loc)
+    except Exception as e:
+        print(f"[ERROR] get_expiration_time: {e}")
+        return []
+
+def select_expiration_time():
+    """Obtiene todos los registros de expiration_time incluyendo el ID (para CRUD)."""
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT expiration_time_id, process_name, defect_code, minute_duration, move_loc FROM expiration_time")
+            data = cursor.fetchall()
+        return data  # lista de (expiration_time_id, process_name, defect_code, minute_duration, move_loc)
+    except Exception as e:
+        print(f"[ERROR] select_expiration_time: {e}")
+        return []
+
+def insert_expiration_time(process_name, defect_code, minute_duration, move_loc):
+    """Inserta un nuevo registro en expiration_time. Retorna el ID generado."""
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO expiration_time (process_name, defect_code, minute_duration, move_loc) VALUES (%s, %s, %s, %s)",
+                (process_name, defect_code, minute_duration, move_loc)
+            )
+            conn.commit()
+            return cursor.lastrowid
+    except Exception as e:
+        print(f"[ERROR] insert_expiration_time: {e}")
+        return None
+
+def update_expiration_time(expiration_time_id, process_name, defect_code, minute_duration, move_loc):
+    """Actualiza un registro existente en expiration_time por ID."""
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "UPDATE expiration_time SET process_name=%s, defect_code=%s, minute_duration=%s, move_loc=%s WHERE expiration_time_id=%s",
+                (process_name, defect_code, minute_duration, move_loc, expiration_time_id)
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"[ERROR] update_expiration_time: {e}")
+
+def delete_expiration_time(expiration_time_id):
+    """Elimina un registro de expiration_time por ID."""
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM expiration_time WHERE expiration_time_id=%s", (expiration_time_id,))
+            conn.commit()
+    except Exception as e:
+        print(f"[ERROR] delete_expiration_time: {e}")
+
+
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
 # parameters_electrical(['Ct', '50', '10', '100', 'Numeric', 'N', 'OK', 'Comentarios'],name)
