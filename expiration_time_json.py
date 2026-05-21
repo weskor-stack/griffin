@@ -14,11 +14,11 @@ def generar_json_expiration(parent_serial_number):
         "refresh_unit": True,
         "source": {
             "workstation": {
-                "station": datos_bd["workStation_ID"],  # <-- Aquí toma "ST30_LASER"
+                "station": datos_bd["workStation_ID"],  # Viene de configurador
                 "type": "Location"
             },
-            "client_id": datos_bd["Client_id"],
-            "employee": datos_bd["operator_id"],
+            "client_id": datos_bd["Client_id"],         # Viene de configurador
+            "employee": datos_bd["operator_id"],        # Viene de configurador
             "password": ""
         },
         "transactions": [
@@ -29,7 +29,8 @@ def generar_json_expiration(parent_serial_number):
                 "commands": [
                     {
                         "name": "RejectIfTimeExpired",
-                        "workstation": datos_bd["workStation_ID"], 
+                        # --- CAMBIO: Ahora los 4 campos de aquí abajo vienen de expiration_time ---
+                        "workstation": datos_bd["process_name_expiration"], 
                         "defect_code": datos_bd["time_defect_code_1"],
                         "minute_duration": datos_bd["minute_duration_1"],
                         "move_to_loc": datos_bd["move_to_loc_1"]
@@ -39,6 +40,7 @@ def generar_json_expiration(parent_serial_number):
         ]
     }
     return estructura_json
+
 def enviar_datos_api(payload, url_destino):
     """
     Función encargada exclusivamente de manejar la petición POST.
@@ -65,7 +67,7 @@ def enviar_datos_api(payload, url_destino):
     except Exception as e:
         print(f"⚠️ Error inesperado al enviar: {e}")
         return False
-
+        
 if __name__ == "__main__":
     
     SIMULACION = True 
