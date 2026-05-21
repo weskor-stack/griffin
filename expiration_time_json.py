@@ -68,22 +68,22 @@ def enviar_datos_api(payload, url_destino):
         print(f"⚠️ Error inesperado al enviar: {e}")
         return False
         
-if __name__ == "__main__":
+# if __name__ == "__main__":
     
-    SIMULACION = True 
-    URL_API = ""
-    serial_api = "SN-123456789"  
+#     SIMULACION = True 
+#     URL_API = ""
+#     serial_api = "SN-123456789"  
 
-    print("--- 1. Generando Payload ---")
-    payload_json = generar_json_expiration(serial_api)
+#     print("--- 1. Generando Payload ---")
+#     payload_json = generar_json_expiration(serial_api)
     
-    if isinstance(payload_json, str) and payload_json.startswith("Error"):
-        print(f"\nSe detuvo el proceso:\n{payload_json}")
-    else:
-        if SIMULACION:
-            print("Los datos NO se enviaron. Este es el payload generado:\n")
-            print(json.dumps(payload_json, indent=4))
-        else:
-            print(f"\n[ MODO SIMULACIÓN: DESACTIVADO ]")
-            print(f"Enviando POST a: {URL_API} ...\n")
-            enviar_datos_api(payload_json, URL_API)
+#     if isinstance(payload_json, str) and payload_json.startswith("Error"):
+#         print(f"\nSe detuvo el proceso:\n{payload_json}")
+#     else:
+#         if SIMULACION:
+#             print("Los datos NO se enviaron. Este es el payload generado:\n")
+#             print(json.dumps(payload_json, indent=4))
+#         else:
+#             print(f"\n[ MODO SIMULACIÓN: DESACTIVADO ]")
+#             print(f"Enviando POST a: {URL_API} ...\n")
+#             enviar_datos_api(payload_json, URL_API)
