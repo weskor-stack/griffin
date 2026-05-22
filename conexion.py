@@ -2645,7 +2645,39 @@ def delete_expiration_time(expiration_time_id):
             conn.commit()
     except Exception as e:
         print(f"[ERROR] delete_expiration_time: {e}")
+# ATTRIBUTES ST20 — incluye defect_code (Tabla 2.3 del PDF ST20)
 
+def select_attributes_st20():
+    """SELECT para la vista ST20: id, name, unit, upper_limit, lower_limit, defect_code."""
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT attribute_id, name, unit, upper_limit, lower_limit, defect_code FROM attribute"
+    )
+    data = cursor.fetchall()
+    cursor.close()
+    return data  # [0]=attribute_id [1]=name [2]=unit [3]=upper_limit [4]=lower_limit [5]=defect_code
+
+def insert_attribute_st20(name, unit, upper_limit, lower_limit, defect_code):
+    """INSERT para la vista ST20. Retorna el ID generado."""
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO attribute (name, unit, upper_limit, lower_limit, defect_code) VALUES (%s, %s, %s, %s, %s)",
+        (name, unit, upper_limit, lower_limit, defect_code)
+    )
+    conn.commit()
+    attribute_id = cursor.lastrowid
+    cursor.close()
+    return attribute_id
+
+def update_attribute_st20(attribute_id, name, unit, upper_limit, lower_limit, defect_code):
+    """UPDATE para la vista ST20."""
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE attribute SET name=%s, unit=%s, upper_limit=%s, lower_limit=%s, defect_code=%s WHERE attribute_id=%s",
+        (name, unit, upper_limit, lower_limit, defect_code, attribute_id)
+    )
+    conn.commit()
+    cursor.close()
 
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
