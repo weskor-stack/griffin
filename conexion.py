@@ -1206,15 +1206,15 @@ def temperature_data(part_id):
                     initial_temperature,
                     final_temperature, 
                     unit,
-                    description, extra1, extra2
+                    description, extra1, extra2,
+                    low_limit, high_limit
                 FROM parameters_temperature
                 WHERE part_id = %s
                 ORDER BY parameters_temperature_id DESC
             ''', (part_id,))
-            # print(cursor.fetchall())
             return cursor.fetchall()
     except Exception as e:
-        # print(f"[ERROR] electrical_data(): {e}")
+        # print(f"[ERROR] temperature_data(): {e}")
         return []
     
 def component_data(part_id):
@@ -2364,35 +2364,29 @@ def return_part_serial_number (numero):
     cursor.close()
     
 ################################################################# Configurador ###########################################################################
-
 def configurador():
-    
     # Obtener configuración actual
     cursor = conn.cursor()
-    cursor.execute("SELECT machine_id, process_name, operator, station, program_name_version, qty_components,client_id,password  FROM configurador")
+    cursor.execute("SELECT machine_id, process_name, operator, station, program_name_version, qty_components, client_id, password, product FROM configurador")
     configurador = cursor.fetchone()
     cursor.close()
 
     if not configurador:
         print("[ERROR] No se encontró configuración activa.")
-        
         return "FAILED"
     
     return configurador
 
 
 ################################################################# Atributos ###########################################################################
-
 def atributos():
     # Obtener atributos actuales
     try:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT name, unit, upper_limit, lower_limit, value_expected, time FROM attribute")
-            
+            # Agregamos defect_code al final para que sea la posición 7 (índice 6)
+            cursor.execute("SELECT name, unit, upper_limit, lower_limit, value_expected, time, defect_code FROM attribute")
             results = cursor.fetchall()
-            # print([result for result in results])
             return [result for result in results]
-            # return [result[0].upper() for result in results]
     except Exception as e:
         print("[ERROR] No se encontraron atributos.")
         return []
