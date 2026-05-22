@@ -1994,38 +1994,39 @@ def get_configurator_data():
     except Exception as e:
         print(f"[ERROR] get_configurator_data(): {e}")
         return None
-
-def update_configurator(url, program_id, device, program_password, tsp):
-    """Actualiza o inserta datos en la tabla configurator"""
+    
+def update_configurator(program_name_version, machine_id, process_name, qty_components, client_id, operator, password, station):
+   
     try:
         with conn.cursor() as cursor:
-            # Verificar si existe un registro
-            cursor.execute("SELECT COUNT(*) FROM configurator")
-            count = cursor.fetchone()[0]
-            
-            if count > 0:
-                # Actualizar registro existente
-                sql = """
-                    UPDATE configurator 
-                    SET url = ?, program_id = ?, device = ?, 
-                        program_password = ?, tsp = ?
-                    WHERE configurator_id = 1
-                """
-            else:
-                # Insertar nuevo registro
-                sql = """
-                    INSERT INTO configurator 
-                    (url, program_id, device, program_password, tsp)
-                    VALUES (?, ?, ?, ?, ?)
-                """
-            
-            cursor.execute(sql, (url, program_id, device, program_password, tsp))
+            sql = """
+                UPDATE configurador 
+                SET `program_name_version` = ?,
+                    `machine_id` = ?, 
+                    `process_name` = ?, 
+                    `qty_components` = ?, 
+                    `client_id` = ?, 
+                    `operator` = ?, 
+                    `password` = ?, 
+                    `station` = ?
+            """
+            cursor.execute(sql, (program_name_version, machine_id, process_name, qty_components, client_id, operator, password, station))
             conn.commit()
             return True
+            
     except Exception as e:
+        conn.rollback()
+        raise Exception(f"Fallo en Base de Datos: {e}")
+            
+    except Exception as e:
+        conn.rollback()
+        raise Exception(f"Fallo en Base de Datos: {e}")
+            
+    except Exception as e:
+        conn.rollback()
         print(f"[ERROR] update_configurator(): {e}")
         return False
-
+    
 def update_export_status(file_type, status):
     """Actualiza el estado de exportación para CSV, JSON o XML"""
     try:
