@@ -39,24 +39,18 @@ class ConfiguradorUI:
         self.root.title("Configuración")
         self.root.geometry("600x600") 
         self.root.configure(bg=BG_MAIN)
-        
-        # --- AJUSTES DE COMPORTAMIENTO DE VENTANA ---
-        # Fuerza a que la ventana tome el foco al abrirse, pero permite 
-        # que pase a segundo plano si das clic en otro programa.
         self.root.focus_force() 
         self.root.attributes("-topmost", False) 
         
         apply_theme()
         self._build_ui()
         
-        # Cargar los datos desde la BD inmediatamente al abrir
         self.cargar()
 
     def _build_ui(self):
         try: self.root.iconbitmap("favicon.ico")
         except: pass
         
-        # --- HEADER (Banda azul) ---
         header = tk.Frame(self.root, bg=BG_HEADER)
         header.pack(fill="x")
         
@@ -65,29 +59,24 @@ class ConfiguradorUI:
         self.subtitle_var = tk.StringVar(value="Todos los campos son obligatorios.")
         tk.Label(header, textvariable=self.subtitle_var, font=FONT_SUBHEAD, bg=BG_HEADER, fg=FG_WHITE).pack(anchor="w", padx=24, pady=(0, 20))
 
-        # --- BARRA DE BOTONES (Banda gris) ---
         btn_frame = tk.Frame(self.root, bg=BG_BUTTON_BAR)
         btn_frame.pack(fill="x")
         
         btn_guardar = tk.Button(btn_frame, text="💾 Guardar Cambios", command=self.guardar, bg=BG_HEADER, fg=FG_WHITE, font=FONT_BTN, relief="flat", cursor="hand2", padx=15, pady=6)
         btn_guardar.pack(side="right", padx=(10, 24), pady=10)
         
-        # CAMBIO: El botón ahora apunta a self.cancelar
         btn_cancelar = tk.Button(btn_frame, text="✕ Cancelar", command=self.cancelar, bg=BG_MAIN, fg="black", font=FONT_BTN, relief="solid", bd=1, cursor="hand2", padx=15, pady=5)
         btn_cancelar.pack(side="right", pady=10)
 
-        # --- PANEL PRINCIPAL (Formulario) ---
         inner = tk.Frame(self.root, bg=BG_MAIN)
         inner.pack(fill="both", expand=True, padx=24, pady=20)
 
         entry_kwargs = {"bg": BG_MAIN, "fg": "black", "relief": "flat", "font": FONT_MONO, 
                         "highlightthickness": 1, "highlightbackground": BORDER_COLOR, "highlightcolor": BG_HEADER}
 
-        # Configuración de grid 2 columnas
         inner.columnconfigure(0, weight=1)
         inner.columnconfigure(1, weight=1)
 
-        # Fila 0: Program Name + Version / Machine ID
         tk.Label(inner, text="PROGRAM NAME + VERSION", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=0, column=0, sticky="w")
         tk.Label(inner, text="MACHINE ID", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=0, column=1, sticky="w", padx=(15,0))
         
@@ -97,7 +86,6 @@ class ConfiguradorUI:
         self.machine_id = tk.Entry(inner, **entry_kwargs)
         self.machine_id.grid(row=1, column=1, sticky="ew", padx=(15, 0), ipady=5, pady=(2, 15))
 
-        # Fila 2: Process Name / Qty Components
         tk.Label(inner, text="PROCESS NAME", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=2, column=0, sticky="w")
         tk.Label(inner, text="QTY COMPONENTS", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=2, column=1, sticky="w", padx=(15,0))
         
@@ -107,7 +95,6 @@ class ConfiguradorUI:
         self.qty_components = tk.Entry(inner, **entry_kwargs)
         self.qty_components.grid(row=3, column=1, sticky="ew", padx=(15, 0), ipady=5, pady=(2, 15))
 
-        # Fila 4: Client ID / Operator ID
         tk.Label(inner, text="CLIENT ID", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=4, column=0, sticky="w")
         tk.Label(inner, text="OPERATOR ID", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=4, column=1, sticky="w", padx=(15,0))
         
@@ -117,7 +104,6 @@ class ConfiguradorUI:
         self.operator_id = tk.Entry(inner, **entry_kwargs)
         self.operator_id.grid(row=5, column=1, sticky="ew", padx=(15, 0), ipady=5, pady=(2, 15))
 
-        # Fila 6: Password / WorkStation ID
         tk.Label(inner, text="PASSWORD", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=6, column=0, sticky="w")
         tk.Label(inner, text="WORKSTATION ID", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=6, column=1, sticky="w", padx=(15,0))
         
@@ -164,7 +150,6 @@ class ConfiguradorUI:
         pas  = self.password.get().strip()
         work = self.workstation_id.get().strip()
  
-        # CAMBIO: Usamos parent=self.root en todos los mensajes de error/éxito
         if not all([prog, mach, proc, qty, cli, ope, pas, work]):
             messagebox.showwarning("Error", "Faltan campos obligatorios.", parent=self.root)
             return
@@ -180,7 +165,6 @@ class ConfiguradorUI:
         except Exception as e:
             messagebox.showerror("Error DB", str(e), parent=self.root)
 
-    # CAMBIO: Esta función reemplaza a limpiar()
     def cancelar(self):
         """Cierra el formulario sin guardar los cambios."""
         self.root.destroy()
