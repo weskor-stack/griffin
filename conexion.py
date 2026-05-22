@@ -114,33 +114,6 @@ def select_distinct(column):
     return data
 
     query = f"""SELECT DISTINCT {column} FROM configurador""" 
-
-def insert_configurador(machine, process, operator, station, product, shop_order):
-    """Actualiza la fila del usuario 9999 con TODOS los campos"""
-    try:
-        cursor = conn.cursor()
-        # 1. Intentamos actualizar la fila existente
-        query_update = """
-            UPDATE configurador 
-            SET machine_id = ?, process_name = ?, operator = ?, station = ?, product = ?, shop_order = ?
-            WHERE user_id = 9999
-        """
-        cursor.execute(query_update, (machine, process, operator, station, product, shop_order))
-        
-        # 2. Si no existe (rowcount == 0), la creamos
-        if cursor.rowcount == 0:
-            query_insert = """
-                INSERT INTO configurador (user_id, machine_id, process_name, operator, station, product, shop_order)
-                VALUES (9999, ?, ?, ?, ?, ?, ?)
-            """
-            cursor.execute(query_insert, (machine, process, operator, station, product, shop_order))
-            
-        conn.commit()
-        cursor.close()
-    except Exception as e:
-        conn.rollback()
-        print(f"Error al guardar: {e}")
-        raise e
     
 def select_configurador():
     cursor = conn.cursor()
@@ -1996,10 +1969,9 @@ def get_configurator_data():
         return None
     
 def update_configurator(program_name_version, machine_id, process_name, qty_components, client_id, operator, password, station):
-   
     try:
         with conn.cursor() as cursor:
-            sql = """
+            sql_update = """
                 UPDATE configurador 
                 SET `program_name_version` = ?,
                     `machine_id` = ?, 
@@ -2010,22 +1982,26 @@ def update_configurator(program_name_version, machine_id, process_name, qty_comp
                     `password` = ?, 
                     `station` = ?
             """
-            cursor.execute(sql, (program_name_version, machine_id, process_name, qty_components, client_id, operator, password, station))
+            cursor.execute(sql_update, (program_name_version, machine_id, process_name, qty_components, client_id, operator, password, station))
+            
+            if cursor.rowcount == 0:
+                cursor.execute("SELECT COUNT(*) FROM configurador")
+                if cursor.fetchone()[0] == 0:
+                    sql_insert = """
+                        INSERT INTO configurador (
+                            `program_name_version`, `machine_id`, `process_name`, 
+                            `qty_components`, `client_id`, `operator`, `password`, `station`
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """
+                    cursor.execute(sql_insert, (program_name_version, machine_id, process_name, qty_components, client_id, operator, password, station))
+            
             conn.commit()
             return True
             
     except Exception as e:
         conn.rollback()
+        # Lanzamos el error hacia la interfaz gráfica para que aparezca en pantalla
         raise Exception(f"Fallo en Base de Datos: {e}")
-            
-    except Exception as e:
-        conn.rollback()
-        raise Exception(f"Fallo en Base de Datos: {e}")
-            
-    except Exception as e:
-        conn.rollback()
-        print(f"[ERROR] update_configurator(): {e}")
-        return False
     
 def update_export_status(file_type, status):
     """Actualiza el estado de exportación para CSV, JSON o XML"""
@@ -2367,15 +2343,22 @@ def return_part_serial_number (numero):
 ################################################################# Configurador ###########################################################################
 def configurador():
     try:
+        conn.commit() 
         cursor = conn.cursor()
-        cursor.execute("SELECT machine_id, process_name, operator, station, program_name_version, qty_components, client_id, password FROM configurador")
-        configurador = cursor.fetchone()
+        cursor.execute("""
+            SELECT machine_id, process_name, operator, station, 
+                   program_name_version, qty_components, client_id, password 
+            FROM configurador 
+            LIMIT 1
+        """)
+        datos_config = cursor.fetchone()
         cursor.close()
 
-        if not configurador:
-            print("[ERROR] No se encontró configuración activa.")
-            return "FAILED"
-        return configurador
+        # if not datos_config:
+        #     print("[INFO] La tabla configurador está vacía. Esperando la primera inserción.")
+        #     return "No_data"
+            
+        return datos_config
     except Exception as e:
         print(f"[ERROR] Error en función configurador(): {e}")
         return "FAILED"

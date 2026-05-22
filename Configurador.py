@@ -12,7 +12,6 @@ BG_MAIN        = "#FFFFFF"
 FG_WHITE       = "#FFFFFF"  
 FG_BLUE_LABEL  = "#00479E"  
 BORDER_COLOR   = "#000000"  
-
 FONT_HEAD      = ("Segoe UI", 18, "bold")
 FONT_SUBHEAD   = ("Segoe UI", 10)
 FONT_LABEL     = ("Segoe UI", 8, "bold")
@@ -32,7 +31,6 @@ def apply_theme():
                     arrowcolor="black", 
                     relief="flat", 
                     padding=5)
-
 class ConfiguradorUI:
     def __init__(self, root):
         self.root = root
@@ -44,7 +42,6 @@ class ConfiguradorUI:
         
         apply_theme()
         self._build_ui()
-        
         self.cargar()
 
     def _build_ui(self):
@@ -117,7 +114,6 @@ class ConfiguradorUI:
         status_bar = tk.Label(self.root, textvariable=self.status_var, font=("Segoe UI", 8), bg=BG_MAIN, fg="#888888")
         status_bar.pack(side="bottom", anchor="w", padx=24, pady=5)
 
-
     def cargar(self):
         try:
             datos = conexion.configurador() 
@@ -139,7 +135,7 @@ class ConfiguradorUI:
                         
         except Exception as e:
             print(f"Error interno al cargar datos: {e}")
-
+    
     def guardar(self):
         prog = self.program_name.get().strip()
         mach = self.machine_id.get().strip()
@@ -150,18 +146,13 @@ class ConfiguradorUI:
         pas  = self.password.get().strip()
         work = self.workstation_id.get().strip()
  
-        if not all([prog, mach, proc, qty, cli, ope, pas, work]):
-            messagebox.showwarning("Error", "Faltan campos obligatorios.", parent=self.root)
-            return
- 
         try:
             exito = conexion.update_configurator(prog, mach, proc, qty, cli, ope, pas, work)
             
             if exito:
-                messagebox.showinfo("Éxito", "Configuración actualizada correctamente.", parent=self.root)
+                messagebox.showinfo("Éxito", "Configuración guardada correctamente.", parent=self.root)
                 self.root.destroy()
-            else:
-                messagebox.showerror("Error", "No se pudo actualizar la base de datos.", parent=self.root)
+                
         except Exception as e:
             messagebox.showerror("Error DB", str(e), parent=self.root)
 
