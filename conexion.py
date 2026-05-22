@@ -2365,18 +2365,19 @@ def return_part_serial_number (numero):
     
 ################################################################# Configurador ###########################################################################
 def configurador():
-    # Obtener configuración actual
-    cursor = conn.cursor()
-    cursor.execute("SELECT machine_id, process_name, operator, station, program_name_version, qty_components, client_id, password, product FROM configurador")
-    configurador = cursor.fetchone()
-    cursor.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT machine_id, process_name, operator, station, program_name_version, qty_components, client_id, password FROM configurador")
+        configurador = cursor.fetchone()
+        cursor.close()
 
-    if not configurador:
-        print("[ERROR] No se encontró configuración activa.")
+        if not configurador:
+            print("[ERROR] No se encontró configuración activa.")
+            return "FAILED"
+        return configurador
+    except Exception as e:
+        print(f"[ERROR] Error en función configurador(): {e}")
         return "FAILED"
-    
-    return configurador
-
 
 ################################################################# Atributos ###########################################################################
 def atributos():

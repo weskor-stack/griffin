@@ -74,7 +74,6 @@ def interlocking_station_20(parent_serial_number, parent_part_number, heater_ser
                 "defect_code": codigo_defecto
             })
 
-    # 2. Lógica de Test Steps según el type_station
     if type_station == 1 or type_station == 4: 
         agregar_steps(conexion.screwing_data(part_id), 11, 11, 2, 3, 5, 6, plc_value)
         
