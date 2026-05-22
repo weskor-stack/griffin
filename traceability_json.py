@@ -1,5 +1,6 @@
 import json
 import conexion
+import rfc3339
 
 def evaluar_codigo_defecto(val_plc, low_lim, high_lim, plc_defect_code, test_name, atributos_db):
     if low_lim in (None, "") or high_lim in (None, ""):
@@ -37,7 +38,9 @@ def interlocking_station_20(parent_serial_number, parent_part_number, heater_ser
         return f"Error: No se encontró la pieza {parent_serial_number}"
         
     part_id = part[0]
-    start_time = part[3]           
+    start_time = part[3]
+    last_digit = str(start_time).split('-')
+    timer = rfc3339.rfc3339(start_time, utc=True, use_system_timezone=False) + " " + last_digit[-1]       
 
     station_info = conexion.stations()
     if not station_info:
@@ -96,7 +99,7 @@ def interlocking_station_20(parent_serial_number, parent_part_number, heater_ser
         "station": machine_id,
         "operator": operator,
         "password": "",
-        "start_time": str(start_time) if start_time else "",
+        "start_time": str(timer) if timer else "",
         "end_time": str(end_time) if end_time else "",
         "type": "PRODUCTION",
         "process_name": process_name,
@@ -129,16 +132,16 @@ def interlocking_station_20(parent_serial_number, parent_part_number, heater_ser
 
     return estructura_json
 
-if __name__ == "__main__":
-    resultado_json = interlocking_station_20(
-        parent_serial_number="P1106394-71-P:SE4A25079000001",
-        parent_part_number="1231284792783",           
-        heater_serial_number="P2170207-00-E:SE4A26127000245", 
-        plc_value="2.33",                                      
-        plc_defect_code="PLC_DEFAULT_001"
-    )
+# if __name__ == "__main__":
+#     resultado_json = interlocking_station_20(
+#         parent_serial_number="P1106394-71-P:SE4A25079000001",
+#         parent_part_number="1231284792783",           
+#         heater_serial_number="P2170207-00-E:SE4A26127000245", 
+#         plc_value="2.33",                                      
+#         plc_defect_code="PLC_DEFAULT_001"
+#     )
     
-    if isinstance(resultado_json, dict):
-        print(json.dumps(resultado_json, indent=4))
-    else:
-        print(f"\nError:\n{resultado_json}")
+#     if isinstance(resultado_json, dict):
+#         print(json.dumps(resultado_json, indent=4))
+#     else:
+#         print(f"\nError:\n{resultado_json}")
