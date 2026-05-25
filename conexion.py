@@ -2346,9 +2346,9 @@ def configurador():
         conn.commit() 
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT machine_id, process_name, operator, station, 
-                   program_name_version, qty_components, client_id, password 
-            FROM configurador 
+            SELECT machine_id, process_name, operator, station,
+                   program_name_version, qty_components, client_id, password, shop_order
+            FROM configurador
             LIMIT 1
         """)
         datos_config = cursor.fetchone()

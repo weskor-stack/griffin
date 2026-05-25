@@ -22,7 +22,7 @@ def evaluar_codigo_defecto(val_plc, low_lim, high_lim, plc_defect_code, test_nam
         
     return plc_defect_code
 
-def interlocking_station_20(parent_serial_number, parent_part_number, heater_serial_number, plc_value, plc_defect_code):
+def traceability_station_20(parent_serial_number, parent_part_number, heater_serial_number, plc_value, plc_defect_code):
     
     config = conexion.configurador()
     if not config or config == "FAILED":
@@ -132,16 +132,148 @@ def interlocking_station_20(parent_serial_number, parent_part_number, heater_ser
 
     return estructura_json
 
+def traceability_station_50_80(parent_serial_number, parent_part_number, component_serial_number, plc_values_dict, plc_defect_code):
+    """
+    API TRACEABILITY para ST50 / ST80 (Loading & Pressing) — PDF Seq 6
+    Parámetros:
+        parent_serial_number    : Serial escaneado del Top Level.
+        parent_part_number      : Part number del Top Level (obtenido de API Unit).
+        component_serial_number : Serial escaneado del componente.
+        plc_values_dict         : Dict con valores medidos { "step_name": valor, ... }.
+        plc_defect_code         : Código de defecto por defecto del PLC.
+    """
+    config = conexion.configurador()
+    if not config or config == "FAILED":
+        return "Error: No se encontró configuración."
+
+    machine_id      = config[0]   # MACHINE_NAME   → campo "station" del JSON
+    process_name    = config[1]   # PROCESS_NAME
+    operator        = config[2]   # ID_OPERATOR
+    program_name    = config[4]   # PROGRAM_ID (model_id)
+    component_label = config[8]   # COMPONENT label (shop_order) → ej. "PCBA"
+
+    part = conexion.obtener_parte(parent_serial_number)
+    if not part or part == "FAILED":
+        return f"Error: No se encontró la pieza {parent_serial_number}"
+
+    part_id    = part[0]
+    start_time = part[3]
+    last_digit = str(start_time).split('-')
+    timer      = rfc3339.rfc3339(start_time, utc=True, use_system_timezone=False) + " " + last_digit[-1]
+
+    station_info = conexion.stations()
+    if not station_info:
+        return "Error: No hay estaciones activas."
+
+    station_id = station_info[0]
+
+    duration       = conexion.duration_json(station_id, part_id)
+    status_general = duration[0] if duration else ""
+    end_time       = duration[1] if duration else ""
+
+    # Atributos ST50/ST80 desde BD:
+    # [0]=attribute_id [1]=name [2]=unit [3]=upper_limit [4]=lower_limit [5]=defect_code
+    atributos_st20   = conexion.select_attributes_st20()
+    test_steps_array = []
+
+    for attr in atributos_st20:
+        step_name  = attr[1]
+        unit       = attr[2]
+        high_lim   = attr[3]
+        low_lim    = attr[4]
+        defect_db  = attr[5]
+
+        val_plc = plc_values_dict.get(step_name, "")
+
+        # Evaluar status y defect_code por paso (índices adaptados a select_attributes_st20)
+        step_status  = "PASS"
+        defect_final = ""
+
+        if val_plc != "" and low_lim not in (None, "") and high_lim not in (None, ""):
+            try:
+                if not (float(low_lim) <= float(val_plc) <= float(high_lim)):
+                    step_status  = "FAIL"
+                    defect_final = defect_db if defect_db else plc_defect_code
+            except (ValueError, TypeError):
+                pass
+        elif val_plc == "":
+            step_status  = "FAIL"
+            defect_final = plc_defect_code
+
+        test_steps_array.append({
+            "name":        step_name,
+            "description": step_name,
+            "comparator":  "GELE",
+            "lowLimit":    low_lim  if low_lim  not in (None, "") else "",
+            "highLimit":   high_lim if high_lim not in (None, "") else "",
+            "units":       unit     if unit else "",
+            "status":      step_status,
+            "value":       val_plc,
+            "defect_code": defect_final
+        })
+
+    estructura_json = {
+        "serial":       parent_serial_number,
+        "product":      parent_part_number,
+        "station":      machine_id,
+        "operator":     operator,
+        "start_time":   str(timer)    if timer    else "",
+        "end_time":     str(end_time) if end_time else "",
+        "process_name": process_name,
+        "status":       status_general,
+        "test_steps": {
+            "STEPS LIST": test_steps_array
+        },
+        "commands": []
+    }
+
+    # Comando 1 — Station ID (Non-tracked)
+    estructura_json["commands"].append({
+        "command":        "ReplaceNontrackedComponent",
+        "ref_designator": f"{process_name}_Station ID",
+        "component_id":   machine_id
+    })
+
+    # Comando 2 — Model ID / Program (Non-tracked)
+    if program_name and str(program_name).strip() != "":
+        estructura_json["commands"].append({
+            "command":        "ReplaceNontrackedComponent",
+            "ref_designator": f"{process_name}_Model ID",
+            "component_id":   program_name
+        })
+
+    # Comando 3 — Componente trazado (Tracked)
+    estructura_json["commands"].append({
+        "command":        "ReplaceTrackedComponent",
+        "ref_designator": f"{process_name}_{component_label}",
+        "component_id":   component_serial_number
+    })
+
+    return estructura_json
+
+
 # if __name__ == "__main__":
-#     resultado_json = interlocking_station_20(
+#     resultado_json = traceability_station_20(
 #         parent_serial_number="P1106394-71-P:SE4A25079000001",
-#         parent_part_number="1231284792783",           
-#         heater_serial_number="P2170207-00-E:SE4A26127000245", 
-#         plc_value="2.33",                                      
+#         parent_part_number="1231284792783",
+#         heater_serial_number="P2170207-00-E:SE4A26127000245",
+#         plc_value="2.33",
 #         plc_defect_code="PLC_DEFAULT_001"
 #     )
-    
+
 #     if isinstance(resultado_json, dict):
 #         print(json.dumps(resultado_json, indent=4))
 #     else:
 #         print(f"\nError:\n{resultado_json}")
+
+#resultado = traceability_station_50_80(
+#    parent_serial_number    = "P1106394-71-P:SE4A25079000001",
+#    parent_part_number      = "2102110-00-C",
+#    component_serial_number = "COMPONENT_ME000000",
+#    plc_values_dict         = {"ID_1": "11", "ID_8": "95"},
+#    plc_defect_code         = "PLC_DEFAULT"
+#)
+# if isinstance(resultado, dict):
+#    print(json.dumps(resultado, indent=4))
+#else:
+#    print(f"\nError:\n{resultado}")
