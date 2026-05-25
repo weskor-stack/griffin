@@ -69,18 +69,19 @@ def interlocking_station_50_80(parent_serial_number, parent_part_number, compone
     })
 
     interlocking_st50_80 = {
-        "test_steps": {
-            "unit_information": unit_information
-        },
         "serial": parent_serial_number,
         "product": parent_part_number,
         "station": station,
         "operator": operator,
         "process_name": process_name,
-        "location": ""
+        "location": "",
+        "test_steps": {
+            "unit_information": unit_information
+        }
+        
     }
-    # print(json.dumps(interlocking_st50_80, indent=4))
+    print(json.dumps(interlocking_st50_80, indent=4))
     return interlocking_st50_80
 
 # interlocking_station_20("AABB-parent_serial_number","CCGG02-parent_part_number","ZZXX01-heater_part_number")
-# interlocking_station_50_80("MODEL1-001-0000015", "2102110-00-C", "COMPONENT-1")
+interlocking_station_50_80("MODEL1-001-0000015", "2102110-00-C", "COMPONENT-1")
