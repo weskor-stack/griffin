@@ -36,7 +36,7 @@ class ConfiguradorUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Configuración")
-        self.root.geometry("600x450") 
+        self.root.geometry("600x370")
         self.root.configure(bg=BG_MAIN)
         self.root.focus_force() 
         self.root.attributes("-topmost", False) 
@@ -52,8 +52,10 @@ class ConfiguradorUI:
         header = tk.Frame(self.root, bg=BG_HEADER)
         header.pack(fill="x")
         
-        tk.Label(header, text="⚙ Configurador", font=FONT_HEAD, bg=BG_HEADER, fg=FG_WHITE).pack(anchor="w", padx=24, pady=(20, 5))
-        
+        tk.Label(header, text="⚙ Configurador de URLs para APIs", font=FONT_HEAD, bg=BG_HEADER, fg=FG_WHITE).pack(anchor="w", padx=24, pady=(20, 5))
+        safe_insert = "Todas las APIs son obligatorias."
+        tk.Label(header, text=safe_insert, font=FONT_SUBHEAD, bg=BG_HEADER, fg=FG_WHITE).pack(anchor="w", padx=24, pady=(0, 20))
+
         btn_frame = tk.Frame(self.root, bg=BG_BUTTON_BAR)
         btn_frame.pack(fill="x")
         
@@ -72,28 +74,19 @@ class ConfiguradorUI:
         inner.columnconfigure(0, weight=1)
         inner.columnconfigure(1, weight=1)
 
-        tk.Label(inner, text="MACHINE NAME", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=0, column=0, sticky="w")
-        tk.Label(inner, text="ID OPERATOR", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=0, column=1, sticky="w", padx=(15,0))
+        tk.Label(inner, text="UNITS", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=0, column=0, sticky="w")
+        tk.Label(inner, text="INTERLOCKING", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=0, column=1, sticky="w", padx=(15,0))
         
-        self.machine_name = tk.Entry(inner, **entry_kwargs)
-        self.machine_name.grid(row=1, column=0, sticky="ew", ipady=5, pady=(2, 15))
+        self.units = tk.Entry(inner, **entry_kwargs)
+        self.units.grid(row=1, column=0, sticky="ew", ipady=5, pady=(2, 15))
         
-        self.id_operator = tk.Entry(inner, **entry_kwargs)
-        self.id_operator.grid(row=1, column=1, sticky="ew", padx=(15, 0), ipady=5, pady=(2, 15))
+        self.interlocking = tk.Entry(inner, **entry_kwargs)
+        self.interlocking.grid(row=1, column=1, sticky="ew", padx=(15, 0), ipady=5, pady=(2, 15))
 
-        tk.Label(inner, text="MODEL ID", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=2, column=0, sticky="w")
-        tk.Label(inner, text="PROCESS NAME", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=2, column=1, sticky="w", padx=(15,0))
+        tk.Label(inner, text="TRACEABILITY", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=2, column=0, sticky="w")
         
-        self.model_id = tk.Entry(inner, **entry_kwargs)
-        self.model_id.grid(row=3, column=0, sticky="ew", ipady=5, pady=(2, 15))
-        
-        self.process_name = tk.Entry(inner, **entry_kwargs)
-        self.process_name.grid(row=3, column=1, sticky="ew", padx=(15, 0), ipady=5, pady=(2, 15))
-
-        tk.Label(inner, text="COMPONENT", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=4, column=0, sticky="w")
-        
-        self.component = tk.Entry(inner, **entry_kwargs)
-        self.component.grid(row=5, column=0, sticky="ew", ipady=5, pady=(2, 15))
+        self.traceability = tk.Entry(inner, **entry_kwargs)
+        self.traceability.grid(row=3, column=0, columnspan=2, sticky="ew", ipady=5, pady=(2, 15))
 
         self.status_var = tk.StringVar(value="Listo")
         status_bar = tk.Label(self.root, textvariable=self.status_var, font=("Segoe UI", 8), bg=BG_MAIN, fg="#888888")
@@ -102,7 +95,6 @@ class ConfiguradorUI:
     def cargar(self):
         try:
             datos = conexion.configurador() 
-            #print(f"[DIAGNÓSTICO UI] Resultado de la DB: {datos}")
             
             if datos and datos != "FAILED":
                 def insertar_seguro(entry_widget, valor):
@@ -110,27 +102,21 @@ class ConfiguradorUI:
                         entry_widget.delete(0, tk.END)
                         entry_widget.insert(0, str(valor).strip())
 
-                #print(f"[DIAGNÓSTICO UI] Cantidad de columnas detectadas: {len(datos)}") # <-- Esto imprimirá en consola
-
                 if len(datos) >= 5:
-                    insertar_seguro(self.machine_name, datos[0]) 
-                    insertar_seguro(self.id_operator, datos[1])   
-                    insertar_seguro(self.model_id, datos[2])     
-                    insertar_seguro(self.process_name, datos[3])  
-                    insertar_seguro(self.component, datos[4])
+                    insertar_seguro(self.units, datos[1])         #UNITS
+                    insertar_seguro(self.interlocking, datos[2])  #INTERLOCKING
+                    insertar_seguro(self.traceability, datos[4])  # TRACEABILITY
                     
         except Exception as e:
             print(f"Error interno al cargar datos: {e}")
     
     def guardar(self):
-        mach = self.machine_name.get().strip()
-        ope  = self.id_operator.get().strip()
-        mod  = self.model_id.get().strip()
-        proc = self.process_name.get().strip()
-        comp = self.component.get().strip()
+        uni  = self.units.get().strip()
+        inte = self.interlocking.get().strip()
+        tra  = self.traceability.get().strip()
  
         try:
-            exito = conexion.update_configurator(mach, ope, mod, proc, comp)
+            exito = conexion.update_configurator("", uni, inte, "", tra)
             
             if exito:
                 messagebox.showinfo("Éxito", "Configuración guardada correctamente.", parent=self.root)
