@@ -133,13 +133,14 @@ def obtener_url_api():
     """Busca la URL en la tabla url_data"""
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT url_data FROM url_data LIMIT 1")
-        res = cursor.fetchone()
+        cursor.execute("SELECT url_data FROM url_data")
+        #res = cursor.fetchone()
+        res = cursor.fetchall()
         cursor.close()
-        return res[0] if res else None
+        return res
     except:
         return None
-    
+
 def insert_attribute(name, unit, upper, lower, value, create_registration):
     cursor = conn.cursor()
     sql = """
@@ -2662,6 +2663,46 @@ def update_attribute_st20(attribute_id, name, unit, upper_limit, lower_limit, de
     )
     conn.commit()
     cursor.close()
+
+#########################################TRACCEABILITY AACMBIOS###############################################################################
+
+def verificar_cantidad_componentes(serial_padre):
+    """
+    Cuenta los componentes guardados para la pieza actual y los compara con qty_components.
+    Retorna True si está COMPLETO (>=), False si está INCOMPLETO (<).
+    """
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT qty_components FROM configurador LIMIT 1")
+        config = cursor.fetchone()
+
+        if not config:
+            cursor.close()
+            return False
+        
+        qty_requerida = int(config[0]) if str(config[0]).isdigit() else 0
+        cursor.execute("SELECT part_id FROM part WHERE part_number = ? ORDER BY part_id DESC LIMIT 1", (serial_padre,))
+        part = cursor.fetchone()
+
+        if not part:
+            cursor.close()
+            return False
+        part_id = part[0]
+
+        cursor.execute("SELECT COUNT(*) FROM component WHERE part_id = ?", (part_id,))
+        cantidad_actual = cursor.fetchone()[0]
+        cursor.close()
+
+        print(f"[VERIFY] Escaneados: {cantidad_actual} / Requeridos: {qty_requerida}")
+        return cantidad_actual >= qty_requerida
+
+    except mariadb.Error as e:
+        print(f"[DB ERROR] verificar_cantidad_componentes: {e}")
+        return False
+    except Exception as e:
+        print(f"[ERROR] verificar_cantidad_componentes: {e}")
+        return False
+    
 
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
