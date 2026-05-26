@@ -35,8 +35,8 @@ def apply_theme():
 class ConfiguradorUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Configuración")
-        self.root.geometry("600x370")
+        self.root.title("Configuración de APIs")
+        self.root.geometry("700x370") 
         self.root.configure(bg=BG_MAIN)
         self.root.focus_force() 
         self.root.attributes("-topmost", False) 
@@ -55,7 +55,7 @@ class ConfiguradorUI:
         tk.Label(header, text="⚙ Configurador de URLs para APIs", font=FONT_HEAD, bg=BG_HEADER, fg=FG_WHITE).pack(anchor="w", padx=24, pady=(20, 5))
         safe_insert = "Todas las APIs son obligatorias."
         tk.Label(header, text=safe_insert, font=FONT_SUBHEAD, bg=BG_HEADER, fg=FG_WHITE).pack(anchor="w", padx=24, pady=(0, 20))
-
+        
         btn_frame = tk.Frame(self.root, bg=BG_BUTTON_BAR)
         btn_frame.pack(fill="x")
         
@@ -74,6 +74,7 @@ class ConfiguradorUI:
         inner.columnconfigure(0, weight=1)
         inner.columnconfigure(1, weight=1)
 
+        # Fila 0 y 1: UNITS e INTERLOCKING
         tk.Label(inner, text="UNITS", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=0, column=0, sticky="w")
         tk.Label(inner, text="INTERLOCKING", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=0, column=1, sticky="w", padx=(15,0))
         
@@ -83,6 +84,7 @@ class ConfiguradorUI:
         self.interlocking = tk.Entry(inner, **entry_kwargs)
         self.interlocking.grid(row=1, column=1, sticky="ew", padx=(15, 0), ipady=5, pady=(2, 15))
 
+        # Fila 2 y 3: TRACEABILITY (Ancho completo)
         tk.Label(inner, text="TRACEABILITY", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=2, column=0, sticky="w")
         
         self.traceability = tk.Entry(inner, **entry_kwargs)
@@ -94,39 +96,40 @@ class ConfiguradorUI:
 
     def cargar(self):
         try:
-            datos = conexion.configurador() 
+            # Llamamos a select_api_configs() para traer las filas de url_data
+            registros = conexion.select_api_configs() 
             
-            if datos and datos != "FAILED":
-                def insertar_seguro(entry_widget, valor):
-                    if valor and str(valor).strip() not in ["(NULL)", "None", ""]:
-                        entry_widget.delete(0, tk.END)
-                        entry_widget.insert(0, str(valor).strip())
+            if registros and registros != "FAILED":
+                # Creamos un diccionario { 'NAME': 'url' } para buscar de forma segura por texto exacto
+                dict_urls = {str(r[2]).strip().upper(): r[3] for r in registros}
 
-                if len(datos) >= 5:
-                    insertar_seguro(self.units, datos[1])         #UNITS
-                    insertar_seguro(self.interlocking, datos[2])  #INTERLOCKING
-                    insertar_seguro(self.traceability, datos[4])  # TRACEABILITY
+                # Insertamos la URL correspondiente buscando por la clave exacta de tu BD
+                self.units.delete(0, tk.END)
+                self.units.insert(0, dict_urls.get("UNITS", ""))
+
+                self.interlocking.delete(0, tk.END)
+                self.interlocking.insert(0, dict_urls.get("INTERLOCKING", ""))
+
+                self.traceability.delete(0, tk.END)
+                self.traceability.insert(0, dict_urls.get("TRACEABILITY", ""))
                     
         except Exception as e:
-            print(f"Error interno al cargar datos: {e}")
+            print(f"Error interno al cargar datos de APIs: {e}")
     
     def guardar(self):
-        uni  = self.units.get().strip()
-        inte = self.interlocking.get().strip()
-        tra  = self.traceability.get().strip()
- 
         try:
-            exito = conexion.update_configurator("", uni, inte, "", tra)
+            # Mandamos la actualización de forma independiente para cada nombre de API
+            conexion.update_api_by_name("UNITS", self.units.get().strip())
+            conexion.update_api_by_name("INTERLOCKING", self.interlocking.get().strip())
+            conexion.update_api_by_name("TRACEABILITY", self.traceability.get().strip())
             
-            if exito:
-                messagebox.showinfo("Éxito", "Configuración guardada correctamente.", parent=self.root)
-                self.root.destroy()
+            messagebox.showinfo("Éxito", "Configuración de APIs guardada correctamente.", parent=self.root)
+            self.root.destroy()
                 
         except Exception as e:
-            messagebox.showerror("Error DB", str(e), parent=self.root)
+            messagebox.showerror("Error DB", f"No se pudo guardar: {e}", parent=self.root)
 
     def cancelar(self):
-        """Cierra el formulario sin guardar los cambios."""
         self.root.destroy()
 
 if __name__ == "__main__":
