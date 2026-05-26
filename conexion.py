@@ -29,8 +29,7 @@ except mariadb.Error as e:
 def obtener_datos_fila_unica():
     try:
         cursor = conn.cursor()
-        # Aquí pedimos explícitamente los 6 datos:
-        cursor.execute("SELECT machine_id, process_name, operator, station, product, shop_order FROM configurador LIMIT 1")
+        cursor.execute("SELECT machine_name, process_name, id_operator, station, product, shop_order FROM configurador LIMIT 1")
         return cursor.fetchone()
     except Exception as e:
         print(f"Error: {e}")
@@ -76,7 +75,6 @@ def select_api_configs():
     rows = cursor.fetchall()
     cursor.close()
     conn.close()
-    print(f"Registros DB: {rows}")  # debug — quítalo cuando funcione
     return rows
 
 def update_api_by_name(nombre, url):
@@ -117,14 +115,12 @@ def select_distinct(column):
     
 def select_configurador():
     cursor = conn.cursor()
-
     cursor.execute("""
-        SELECT configurador_id, machine_id, process_name, operator, station
+        SELECT configurador_id, machine_name, process_name, id_operator, station
         FROM configurador
         ORDER BY configurador_id DESC
         LIMIT 1
     """)
-
     data = cursor.fetchone()
     cursor.close()
     return data
@@ -1951,56 +1947,52 @@ def parameters_graph(element):
 
 ############################################### CONFIGURADOR ####################################################
 
-
 def get_configurator_data():
     """Obtiene los datos de configuración actuales"""
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT configurator_id, url, program_id, device, 
+                SELECT configurador_id, url, program_id, device, 
                        program_password, tsp
-                FROM configurator 
+                FROM configurador 
                 LIMIT 1
             """)
             config = cursor.fetchone()
             return config
+        
     except Exception as e:
         print(f"[ERROR] get_configurator_data(): {e}")
         return None
     
-def update_configurator(program_name_version, machine_id, process_name, qty_components, client_id, operator, password, station):
+def update_configurator(machine_name, id_operator, model_id, process_name, component):
     try:
         with conn.cursor() as cursor:
             sql_update = """
                 UPDATE configurador 
-                SET `program_name_version` = ?,
-                    `machine_id` = ?, 
+                SET `machine_name` = ?, 
+                    `id_operator` = ?, 
+                    `model_id` = ?, 
                     `process_name` = ?, 
-                    `qty_components` = ?, 
-                    `client_id` = ?, 
-                    `operator` = ?, 
-                    `password` = ?, 
-                    `station` = ?
+                    `shop_order` = ?
             """
-            cursor.execute(sql_update, (program_name_version, machine_id, process_name, qty_components, client_id, operator, password, station))
+            cursor.execute(sql_update, (machine_name, id_operator, model_id, process_name, component))
             
             if cursor.rowcount == 0:
                 cursor.execute("SELECT COUNT(*) FROM configurador")
                 if cursor.fetchone()[0] == 0:
                     sql_insert = """
                         INSERT INTO configurador (
-                            `program_name_version`, `machine_id`, `process_name`, 
-                            `qty_components`, `client_id`, `operator`, `password`, `station`
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            `machine_name`, `id_operator`, `model_id`, 
+                            `process_name`, `shop_order`
+                        ) VALUES (?, ?, ?, ?, ?)
                     """
-                    cursor.execute(sql_insert, (program_name_version, machine_id, process_name, qty_components, client_id, operator, password, station))
+                    cursor.execute(sql_insert, (machine_name, id_operator, model_id, process_name, component))
             
             conn.commit()
             return True
             
     except Exception as e:
         conn.rollback()
-        # Lanzamos el error hacia la interfaz gráfica para que aparezca en pantalla
         raise Exception(f"Fallo en Base de Datos: {e}")
     
 def update_export_status(file_type, status):
@@ -2345,18 +2337,14 @@ def configurador():
     try:
         conn.commit() 
         cursor = conn.cursor()
+        
         cursor.execute("""
-            SELECT machine_id, process_name, operator, station, 
-                   program_name_version, qty_components, client_id, password 
+            SELECT machine_name, id_operator, model_id, process_name, shop_order
             FROM configurador 
             LIMIT 1
         """)
         datos_config = cursor.fetchone()
         cursor.close()
-
-        # if not datos_config:
-        #     print("[INFO] La tabla configurador está vacía. Esperando la primera inserción.")
-        #     return "No_data"
             
         return datos_config
     except Exception as e:
@@ -2632,36 +2620,52 @@ def delete_expiration_time(expiration_time_id):
 # ATTRIBUTES ST20 — incluye defect_code (Tabla 2.3 del PDF ST20)
 
 def select_attributes_st20():
-    """SELECT para la vista ST20: id, name, unit, upper_limit, lower_limit, defect_code."""
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT attribute_id, name, unit, upper_limit, lower_limit, defect_code FROM attribute"
-    )
-    data = cursor.fetchall()
-    cursor.close()
-    return data  # [0]=attribute_id [1]=name [2]=unit [3]=upper_limit [4]=lower_limit [5]=defect_code
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT attribute_id, name, unit, upper_limit, lower_limit, defect_code, defect_code_high 
+            FROM attribute
+        """)
+        registros = cursor.fetchall()
+        cursor.close()
+        return registros
+    except Exception as e:
+        print(f"Error en select_attributes_st20: {e}")
+        return []
 
-def insert_attribute_st20(name, unit, upper_limit, lower_limit, defect_code):
-    """INSERT para la vista ST20. Retorna el ID generado."""
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO attribute (name, unit, upper_limit, lower_limit, defect_code) VALUES (%s, %s, %s, %s, %s)",
-        (name, unit, upper_limit, lower_limit, defect_code)
-    )
-    conn.commit()
-    attribute_id = cursor.lastrowid
-    cursor.close()
-    return attribute_id
+def insert_attribute_st20(name, unit, upper_limit, lower_limit, defect_code_low, defect_code_high):
+    try:
+        with conn.cursor() as cursor:
+            sql = """
+                INSERT INTO attribute (name, unit, upper_limit, lower_limit, defect_code, defect_code_high)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """
+            cursor.execute(sql, (name, unit, upper_limit, lower_limit, defect_code_low, defect_code_high))
+            conn.commit()
+            return cursor.lastrowid
+    except Exception as e:
+        conn.rollback()
+        raise Exception(f"Error al insertar atributo: {e}")
 
-def update_attribute_st20(attribute_id, name, unit, upper_limit, lower_limit, defect_code):
-    """UPDATE para la vista ST20."""
-    cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE attribute SET name=%s, unit=%s, upper_limit=%s, lower_limit=%s, defect_code=%s WHERE attribute_id=%s",
-        (name, unit, upper_limit, lower_limit, defect_code, attribute_id)
-    )
-    conn.commit()
-    cursor.close()
+def update_attribute_st20(attribute_id, name, unit, upper_limit, lower_limit, defect_code_low, defect_code_high):
+    try:
+        with conn.cursor() as cursor:
+            sql = """
+                UPDATE attribute 
+                SET name = ?, 
+                    unit = ?, 
+                    upper_limit = ?, 
+                    lower_limit = ?, 
+                    defect_code = ?, 
+                    defect_code_high = ?
+                WHERE attribute_id = ?
+            """
+            cursor.execute(sql, (name, unit, upper_limit, lower_limit, defect_code_low, defect_code_high, attribute_id))
+            conn.commit()
+            return True
+    except Exception as e:
+        conn.rollback()
+        raise Exception(f"Error al actualizar atributo: {e}")
 
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
