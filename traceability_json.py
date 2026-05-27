@@ -134,6 +134,51 @@ def traceability_station_20(parent_serial_number, parent_part_number, heater_ser
 
     return estructura_json
 
+def interlocking_station_50_80(parent_serial_number, parent_part_number, component_pn):
+    """
+    API INTERLOCKING para ST50 / ST80 (Loading & Pressing) — PDF Seq 5
+    Parámetros:
+        parent_serial_number : Serial escaneado del Top Level.
+        parent_part_number   : Part number del Top Level (obtenido de API Unit - Top Level).
+        component_pn         : Part number del componente (obtenido de API Unit - Component).
+    """
+    config = conexion.configurador()
+    if not config or config == "FAILED":
+        return "Error: No se encontró configuración."
+
+    machine_id   = config[0]   # MACHINE_NAME
+    process_name = config[1]   # PROCESS_NAME
+    operator     = config[2]   # ID_OPERATOR
+    model_id     = config[4]   # MODEL_ID
+
+    estructura_json = {
+        "serial":       parent_serial_number,
+        "product":      parent_part_number,
+        "station":      machine_id,
+        "operator":     operator,
+        "process_name": process_name,
+        "location":     "",
+        "test_steps": {
+            "unit_information": [
+                {
+                    "name":  "station_id",
+                    "value": machine_id
+                },
+                {
+                    "name":  "model_id",
+                    "value": model_id
+                },
+                {
+                    "name":  "component_partnumber",
+                    "value": component_pn
+                }
+            ]
+        }
+    }
+
+    return estructura_json
+
+
 def traceability_station_50_80(parent_serial_number, parent_part_number, component_serial_number, plc_defect_code):
     """
     API TRACEABILITY para ST50 / ST80 (Loading & Pressing) — PDF Seq 6
@@ -259,11 +304,10 @@ def traceability_station_50_80(parent_serial_number, parent_part_number, compone
 #         print(f"\nError:\n{resultado_json}")
 
 if __name__ == "__main__":
-    resultado = traceability_station_50_80(
-        parent_serial_number    = "P1106394-71-P:SE4A25079000001",
-        parent_part_number      = "2102110-00-C",
-        component_serial_number = "COMPONENT_ME000000",
-        plc_defect_code         = "PLC_DEFAULT"
+    resultado = interlocking_station_50_80(
+        parent_serial_number = "P1517040-01-G:REV01:SANN26097000001",
+        parent_part_number   = "2102110-00-C",
+        component_pn         = "COMPONENT-1"
     )
     if isinstance(resultado, dict):
         print(json.dumps(resultado, indent=4))
