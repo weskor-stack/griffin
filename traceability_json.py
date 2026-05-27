@@ -56,42 +56,44 @@ def traceability_station_20(parent_serial_number, parent_part_number, heater_ser
     atributos_db = conexion.atributos()
     test_steps_array = []
 
-    def agregar_steps(data_list, name_idx, desc_idx, low_idx, high_idx, unit_idx, status_idx, val_source):
+    def agregar_steps(data_list, name_idx, desc_idx, low_idx, high_idx, unit_idx, status_idx, val_source, comp_idx):
         for x in data_list:
             low = x[low_idx] if low_idx is not None else ""
             high = x[high_idx] if high_idx is not None else ""
             val = x[val_source] if isinstance(val_source, int) else val_source
             test_name = x[name_idx]
-            
+
             codigo_defecto = evaluar_codigo_defecto(val, low, high, plc_defect_code, test_name, atributos_db)
 
             test_steps_array.append({
-                "name": test_name,                           
-                "description": x[desc_idx] if desc_idx is not None else test_name, 
-                "comparator": "GELE",
-                "lowLimit": low,
-                "highLimit": high,
+                "name": test_name,
+                "description": x[desc_idx] if desc_idx is not None else test_name,
+                "comparator": x[comp_idx] if comp_idx is not None else "",
+                "lowLimit":  low  if low  is not None else "",
+                "highLimit": high if high is not None else "",
                 "units": x[unit_idx] if unit_idx is not None else "",
                 "status": x[status_idx] if status_idx is not None else "PASSED",
                 "value": val,
                 "defect_code": codigo_defecto
             })
 
-    if type_station == 1 or type_station == 4: 
-        agregar_steps(conexion.screwing_data(part_id), 11, 11, 2, 3, 5, 6, plc_value)
-        
-    if type_station == 2 or type_station == 4: 
-        agregar_steps(conexion.pressfit_data(part_id), 11, 11, 2, 3, 5, 6, plc_value)
-        
-    if type_station == 3 or type_station == 4: 
-        agregar_steps(conexion.inspection_data(part_id), 11, 11, 2, 3, 5, 6, plc_value)
-        
-    if type_station == 4: 
-        agregar_steps(conexion.electrical_data(part_id), 11, 11, 2, 3, 5, 6, plc_value)
-        agregar_steps(conexion.continuity_data(part_id), 0, 0, 3, 4, 5, 6, 7)
-        agregar_steps(conexion.leaktest_data(part_id), 0, 0, None, None, 4, 3, 2)
-        agregar_steps(conexion.welding_data(part_id), 0, 0, None, None, 6, 5, 2)
-        agregar_steps(conexion.temperature_data(part_id), 0, 0, 9, 10, 5, None, 4)
+    # comp_idx [7]=compoperator en screwing/pressfit/inspection/electrical
+    # comp_idx [2]=compoperator en continuity | [8] en leaktest y welding | None en temperature
+    if type_station == 1 or type_station == 4:
+        agregar_steps(conexion.screwing_data(part_id),    11, 11, 2,    3,    5, 6,    plc_value, 7)
+
+    if type_station == 2 or type_station == 4:
+        agregar_steps(conexion.pressfit_data(part_id),    11, 11, 2,    3,    5, 6,    plc_value, 7)
+
+    if type_station == 3 or type_station == 4:
+        agregar_steps(conexion.inspection_data(part_id),  11, 11, 2,    3,    5, 6,    plc_value, 7)
+
+    if type_station == 4:
+        agregar_steps(conexion.electrical_data(part_id),  11, 11, 2,    3,    5, 6,    plc_value, 7)
+        agregar_steps(conexion.continuity_data(part_id),   0,  0, 3,    4,    5, 6,            7, 2)
+        agregar_steps(conexion.leaktest_data(part_id),     0,  0, None, None, 4, 3,            2, 8)
+        agregar_steps(conexion.welding_data(part_id),      0,  0, None, None, 6, 5,            2, 8)
+        agregar_steps(conexion.temperature_data(part_id),  0,  0, 9,    10,   5, None,         4, None)
 
     estructura_json = {
         "serial": parent_serial_number,
@@ -132,25 +134,25 @@ def traceability_station_20(parent_serial_number, parent_part_number, heater_ser
 
     return estructura_json
 
-def traceability_station_50_80(parent_serial_number, parent_part_number, component_serial_number, plc_values_dict, plc_defect_code):
+def traceability_station_50_80(parent_serial_number, parent_part_number, component_serial_number, plc_defect_code):
     """
     API TRACEABILITY para ST50 / ST80 (Loading & Pressing) — PDF Seq 6
     Parámetros:
         parent_serial_number    : Serial escaneado del Top Level.
         parent_part_number      : Part number del Top Level (obtenido de API Unit).
         component_serial_number : Serial escaneado del componente.
-        plc_values_dict         : Dict con valores medidos { "step_name": valor, ... }.
         plc_defect_code         : Código de defecto por defecto del PLC.
+    Valores de medición y límites obtenidos directamente de BD (pressfit + inspection).
     """
     config = conexion.configurador()
     if not config or config == "FAILED":
         return "Error: No se encontró configuración."
 
-    machine_id      = config[0]   # MACHINE_NAME   → campo "station" del JSON
+    machine_id      = config[0]   # MACHINE_NAME
     process_name    = config[1]   # PROCESS_NAME
     operator        = config[2]   # ID_OPERATOR
     program_name    = config[4]   # PROGRAM_ID (model_id)
-    component_label = config[8]   # COMPONENT label (shop_order) → ej. "PCBA"
+    component_label = config[8]   # COMPONENT label (shop_order)
 
     part = conexion.obtener_parte(parent_serial_number)
     if not part or part == "FAILED":
@@ -171,46 +173,36 @@ def traceability_station_50_80(parent_serial_number, parent_part_number, compone
     status_general = duration[0] if duration else ""
     end_time       = duration[1] if duration else ""
 
-    # Atributos ST50/ST80 desde BD:
-    # [0]=attribute_id [1]=name [2]=unit [3]=upper_limit [4]=lower_limit [5]=defect_code
-    atributos_st20   = conexion.select_attributes_st20()
+    # Defect codes desde tabla attribute (misma fuente que ST20)
+    atributos_db     = conexion.atributos()
     test_steps_array = []
 
-    for attr in atributos_st20:
-        step_name  = attr[1]
-        unit       = attr[2]
-        high_lim   = attr[3]
-        low_lim    = attr[4]
-        defect_db  = attr[5]
+    # Helper idéntico al de ST20 — indices: [1]=value [2]=low [3]=high
+    # [5]=unit [6]=result [7]=compoperator [10]=description [11]=name
+    def agregar_steps(data_list, name_idx, desc_idx, low_idx, high_idx, unit_idx, status_idx, comp_idx):
+        for x in data_list:
+            low       = x[low_idx]  if low_idx  is not None else ""
+            high      = x[high_idx] if high_idx is not None else ""
+            val       = x[1]
+            step_name = x[name_idx]
 
-        val_plc = plc_values_dict.get(step_name, "")
+            codigo_defecto = evaluar_codigo_defecto(val, low, high, plc_defect_code, step_name, atributos_db)
 
-        # Evaluar status y defect_code por paso (índices adaptados a select_attributes_st20)
-        step_status  = "PASS"
-        defect_final = ""
+            test_steps_array.append({
+                "name":        step_name,
+                "description": x[desc_idx] if desc_idx is not None else step_name,
+                "comparator":  x[comp_idx] if comp_idx is not None else "",
+                "lowLimit":    low  if low  is not None else "",
+                "highLimit":   high if high is not None else "",
+                "units":       x[unit_idx]   if x[unit_idx]   else "",
+                "status":      x[status_idx] if x[status_idx] else "PASSED",
+                "value":       val,
+                "defect_code": codigo_defecto
+            })
 
-        if val_plc != "" and low_lim not in (None, "") and high_lim not in (None, ""):
-            try:
-                if not (float(low_lim) <= float(val_plc) <= float(high_lim)):
-                    step_status  = "FAIL"
-                    defect_final = defect_db if defect_db else plc_defect_code
-            except (ValueError, TypeError):
-                pass
-        elif val_plc == "":
-            step_status  = "FAIL"
-            defect_final = plc_defect_code
-
-        test_steps_array.append({
-            "name":        step_name,
-            "description": step_name,
-            "comparator":  "GELE",
-            "lowLimit":    low_lim  if low_lim  not in (None, "") else "",
-            "highLimit":   high_lim if high_lim not in (None, "") else "",
-            "units":       unit     if unit else "",
-            "status":      step_status,
-            "value":       val_plc,
-            "defect_code": defect_final
-        })
+    # name=11 | desc=10 | low=2 | high=3 | unit=5 | status=6 | comp=7
+    agregar_steps(conexion.pressfit_data(part_id),    11, 10, 2, 3, 5, 6, 7)
+    agregar_steps(conexion.inspection_data3(part_id), 11, 10, 2, 3, 5, 6, 7)
 
     estructura_json = {
         "serial":       parent_serial_number,
@@ -266,14 +258,14 @@ def traceability_station_50_80(parent_serial_number, parent_part_number, compone
 #     else:
 #         print(f"\nError:\n{resultado_json}")
 
-#resultado = traceability_station_50_80(
-#    parent_serial_number    = "P1106394-71-P:SE4A25079000001",
-#    parent_part_number      = "2102110-00-C",
-#    component_serial_number = "COMPONENT_ME000000",
-#    plc_values_dict         = {"ID_1": "11", "ID_8": "95"},
-#    plc_defect_code         = "PLC_DEFAULT"
-#)
-# if isinstance(resultado, dict):
-#    print(json.dumps(resultado, indent=4))
-#else:
-#    print(f"\nError:\n{resultado}")
+if __name__ == "__main__":
+    resultado = traceability_station_50_80(
+        parent_serial_number    = "P1106394-71-P:SE4A25079000001",
+        parent_part_number      = "2102110-00-C",
+        component_serial_number = "COMPONENT_ME000000",
+        plc_defect_code         = "PLC_DEFAULT"
+    )
+    if isinstance(resultado, dict):
+        print(json.dumps(resultado, indent=4))
+    else:
+        print(f"\nError:\n{resultado}")
