@@ -1,3 +1,5 @@
+import os
+import glob 
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
@@ -5,7 +7,7 @@ import conexion
 import importlib
 importlib.reload(conexion)
 
-# ── Constantes visuales (mismas que Attributes.py) ───────────────────────────
+# ── Constantes visuales
 BG_HEADER      = "#1565C0"
 BG_BUTTON_BAR  = "#F3F3F3"
 BG_MAIN        = "#FFFFFF"
@@ -23,26 +25,25 @@ FONT_LABEL     = ("Segoe UI", 8, "bold")
 FONT_MONO      = ("Consolas", 10)
 FONT_BTN       = ("Segoe UI", 9, "bold")
 
-# ── Columnas Treeview (orden PDF Tabla 2.3) ──────────────────────────────────
-COLUMNS = ("Step_Name", "Unit_of_Measurement", "Low_Limit", "High_Limit", "Defect_Code_Low", "Defect_Code_High")
+COLUMNS = ("Step_Name", "Unit", "Low_Limit", "High_Limit", "Defect_Code_Low", "Defect_Code_High")
 COL_HEADERS = {
     "Step_Name":           "Step Name",
-    "Unit_of_Measurement": "Unit of Measurement",
+    "Unit":                "Unit",
     "Low_Limit":           "Low Limit",
     "High_Limit":          "High Limit",
-    "Defect_Code_Low":     "Defect Code -LOW",
-    "Defect_Code_High":    "Defect-Code HIGH",
+    "Defect_Code_Low":     "Defect Code - Low",
+    "Defect_Code_High":    "Defect Code - High",
 }
 COL_WIDTHS = {
     "Step_Name":           180,
-    "Unit_of_Measurement": 140,
+    "Unit":                130,
     "Low_Limit":           90,
     "High_Limit":          90,
-    "Defect_Code_Low":     130,
-    "Defect_Code_High":    130,
+    "Defect_Code_Low":     140,
+    "High_Limit":          90,
+    "Defect_Code_High":    140,
 }
 
-#  Ventana 
 class VentanaFormulario:
     def __init__(self, principal, modo, item=None, datos=None):
         """
@@ -56,8 +57,8 @@ class VentanaFormulario:
         self.item      = item
 
         self.ventana = tk.Toplevel(principal.root)
-        self.ventana.title(f"{modo} Atributo ST20")
-        self.ventana.geometry("400x480") # Incrementado ligeramente de 420 a 480 para acomodar el campo extra
+        self.ventana.title(f"{modo} Atributo ST50-80")
+        self.ventana.geometry("400x470")
         self.ventana.configure(bg=BG_MAIN)
         self.ventana.resizable(False, False)
         self.ventana.grab_set()
@@ -67,14 +68,14 @@ class VentanaFormulario:
         except Exception:
             pass
 
-        # ── Header ──────────────────────────────────────────────────────────
+        #Header 
         header = tk.Frame(self.ventana, bg=BG_HEADER)
         header.pack(fill="x")
-        tk.Label(header, text=f"📋 {modo} Atributo",
+        tk.Label(header, text=f"📋 {modo} Atributo ST50-80",
                  font=("Segoe UI", 14, "bold"),
                  bg=BG_HEADER, fg=FG_WHITE).pack(anchor="w", padx=20, pady=15)
 
-        # ── Formulario ───────────────────────────────────────────────────────
+        #Formulario 
         form_frame = tk.Frame(self.ventana, bg=BG_MAIN)
         form_frame.pack(fill="both", expand=True, padx=30, pady=(15, 0))
 
@@ -86,8 +87,8 @@ class VentanaFormulario:
         self.var_defect_high = tk.StringVar()
 
         if datos:
-            self.var_name.set(datos.get("name",        ""))
-            self.var_unit.set(datos.get("unit",        ""))
+            self.var_name.set(datos.get("name", ""))
+            self.var_unit.set(datos.get("unit", ""))
             self.var_low.set( datos.get("lower_limit", ""))
             self.var_high.set(datos.get("upper_limit", ""))
             self.var_defect_low.set(datos.get("defect_code_low", ""))
@@ -98,13 +99,13 @@ class VentanaFormulario:
             ("Unit of Measurement", self.var_unit),
             ("Low Limit",           self.var_low),
             ("High Limit",          self.var_high),
-            ("Defect Code -LOW",    self.var_defect_low),
-            ("Defect-Code HIGH",   self.var_defect_high),
+            ("Defect Code - Low",   self.var_defect_low),
+            ("Defect Code - High",  self.var_defect_high),
         ]
         for label_text, var in campos:
             self._crear_campo(form_frame, label_text, var)
 
-        # ── Botón Guardar ────────────────────────────────────────────────────
+        #Botón Guardar
         btn_frame = tk.Frame(self.ventana, bg=BG_BUTTON_BAR)
         btn_frame.pack(fill="x")
         tk.Button(btn_frame, text="💾  Guardar",
@@ -117,14 +118,14 @@ class VentanaFormulario:
     def _crear_campo(self, parent, texto, variable):
         tk.Label(parent, text=texto.upper(),
                  bg=BG_MAIN, fg=FG_BLUE_LABEL,
-                 font=FONT_LABEL).pack(anchor="w", pady=(5, 0))
+                 font=FONT_LABEL).pack(anchor="w", pady=(2, 0))
         entry = tk.Entry(parent, textvariable=variable,
                          bg=BG_MAIN, fg=FG_DARK,
                          relief="flat", font=FONT_MONO,
                          highlightthickness=1,
                          highlightbackground=BORDER_COLOR,
                          highlightcolor=BG_HEADER)
-        entry.pack(fill="x", ipady=4, pady=(2, 8))
+        entry.pack(fill="x", ipady=3, pady=(1, 4))
 
     def _guardar(self):
         name              = self.var_name.get().strip()
@@ -155,12 +156,12 @@ class VentanaFormulario:
 
         self.ventana.destroy()
 
-#  Ventana principal — Lista y botones 
+#  Ventana principal
 class FormularioPrincipal:
     def __init__(self, root):
         self.root = root
-        self.root.title("Attributes")
-        self.root.geometry("850x520") # Ajustado de 800 a 850 para dar espacio a la columna nueva
+        self.root.title("Configuracion de atributos")
+        self.root.geometry("850x520")
         self.root.configure(bg=BG_MAIN)
         self.data = {}
 
@@ -169,7 +170,7 @@ class FormularioPrincipal:
         except Exception:
             pass
 
-        # ── Estilos Treeview ─────────────────────────────────────────────────
+        #Estilos Treeview
         style = ttk.Style()
         style.theme_use("clam")
         style.configure("Treeview.Heading",
@@ -188,7 +189,7 @@ class FormularioPrincipal:
                   background=[("selected", "#D0E8FF")],
                   foreground=[("selected", "black")])
 
-        # ── Header ───────────────────────────────────────────────────────────
+        #Header 
         header = tk.Frame(self.root, bg=BG_HEADER)
         header.pack(fill="x")
         tk.Label(header, text="⚙ Gestión de Atributos",
@@ -198,7 +199,7 @@ class FormularioPrincipal:
                  font=FONT_SUBHEAD, bg=BG_HEADER, fg=FG_WHITE).pack(
                      anchor="w", padx=24, pady=(0, 20))
 
-        # ── Botones ──────────────────────────────────────────────────────────
+        #Botones 
         frame_botones = tk.Frame(self.root, bg=BG_BUTTON_BAR)
         frame_botones.pack(fill="x")
 
@@ -223,6 +224,7 @@ class FormularioPrincipal:
                   padx=15, pady=5,
                   command=self.eliminar).grid(row=0, column=2, padx=10)
 
+        #Tabla 
         tabla_frame = tk.Frame(self.root, bg=BG_MAIN)
         tabla_frame.pack(fill="both", expand=True, padx=24, pady=20)
 
@@ -246,6 +248,7 @@ class FormularioPrincipal:
 
         self.cargar_datos()
 
+    #Carga
     def cargar_datos(self):
         self.tabla.delete(*self.tabla.get_children())
         self.data.clear()
@@ -254,16 +257,17 @@ class FormularioPrincipal:
             registros = conexion.select_attributes_st50_80()
             
             for i, registro in enumerate(registros):
-                tag = "par" if i % 2 == 0 else "impar"  
+                tag = "par" if i % 2 == 0 else "impar"
+                
                 r = ["" if x is None or str(x).strip().upper() == "NONE" else str(x).strip() for x in registro]
                 
                 item = self.tabla.insert("", "end", values=(
-                    r[1],  # name
-                    r[2],  # unit
-                    r[3],  # lower_limit
-                    r[4],  # upper_limit
-                    r[5],  # defect_code
-                    r[6]   # defect_code_high
+                    r[1],  # Step_Name
+                    r[2],  # Unit_of_Measurement
+                    r[3],  # Low_Limit 
+                    r[4],  # High_Limit 
+                    r[5],  # Defect_Code_Low
+                    r[6],  # Defect_Code_High
                 ), tags=(tag,))
 
                 self.data[item] = {
@@ -278,6 +282,7 @@ class FormularioPrincipal:
         except Exception as e:
             print(f"Error al cargar datos: {e}")
 
+    #Acciones 
     def abrir_agregar(self):
         VentanaFormulario(self, "Agregar")
 
@@ -368,7 +373,7 @@ class FormularioPrincipal:
                 messagebox.showerror("Error", f"No se pudo eliminar: {e}")
 
 
-# ── Entry point ──────────────────────────────────────────────────────────────
+#Entry point 
 if __name__ == "__main__":
     root = tk.Tk()
     app = FormularioPrincipal(root)

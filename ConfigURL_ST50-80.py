@@ -38,7 +38,6 @@ class FormularioApiConfig:
     def __init__(self, root):
         self.root = root
         self.root.title("Configuración de URLs")
-        # Ajustamos altura para acomodar la lista vertical
         self.root.geometry("600x480") 
         self.root.configure(bg=BG_MAIN)
         self.root.resizable(False, False)
@@ -49,7 +48,6 @@ class FormularioApiConfig:
         except:
             pass
 
-        # Las APIs que aparecerán en la lista vertical
         self.APIS_BASE = [
             "UNIT",
             "INTERLOCKING",
@@ -109,7 +107,7 @@ class FormularioApiConfig:
     def _crear_campo_vertical(self, nombre):
         """Crea un campo ocupando todo el ancho disponible en una fila nueva."""
         frame = tk.Frame(self.container, bg=BG_MAIN)
-        frame.pack(fill="x", pady=10) # pady da espacio entre cada bloque
+        frame.pack(fill="x", pady=10) 
 
         tk.Label(frame, text=nombre,
                  font=FONT_LABEL,
@@ -123,7 +121,7 @@ class FormularioApiConfig:
                          highlightthickness=1,
                          highlightcolor=BG_HEADER,
                          highlightbackground=BORDER_COLOR)
-        entry.pack(fill="x", ipady=7, pady=(3, 0)) # ipady aumenta la altura del cuadro de texto
+        entry.pack(fill="x", ipady=7, pady=(3, 0)) 
 
         self.entries[nombre] = entry
 
@@ -143,7 +141,7 @@ class FormularioApiConfig:
                         valor_url = str(valor_url).strip()
                     
                     if nombre_api in dict_db and dict_db[nombre_api] != "" and valor_url == "":
-                        continue # Ignora este registro vacío y conserva el que ya tenía URL
+                        continue 
                         
                     dict_db[nombre_api] = valor_url
 
