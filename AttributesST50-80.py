@@ -251,26 +251,29 @@ class FormularioPrincipal:
         self.data.clear()
 
         try:
-            registros = conexion.select_attributes_st20()
+            registros = conexion.select_attributes_st50_80()
+            
             for i, registro in enumerate(registros):
-                tag = "par" if i % 2 == 0 else "impar"
+                tag = "par" if i % 2 == 0 else "impar"  
+                r = ["" if x is None or str(x).strip().upper() == "NONE" else str(x).strip() for x in registro]
+                
                 item = self.tabla.insert("", "end", values=(
-                    registro[1],  # Step_Name
-                    registro[2],  # Unit_of_Measurement
-                    registro[4],  # Low_Limit  (lower_limit)
-                    registro[3],  # High_Limit (upper_limit)
-                    registro[5],  # Defect_Code_Low
-                    registro[6]   # Defect_Code_High
+                    r[1],  # name
+                    r[2],  # unit
+                    r[3],  # lower_limit
+                    r[4],  # upper_limit
+                    r[5],  # defect_code
+                    r[6]   # defect_code_high
                 ), tags=(tag,))
 
                 self.data[item] = {
-                    "attribute_id":      registro[0],
-                    "name":              registro[1],
-                    "unit":              registro[2],
-                    "upper_limit":       registro[3],
-                    "lower_limit":       registro[4],
-                    "defect_code_low":   registro[5],
-                    "defect_code_high":  registro[6],
+                    "attribute_id":      r[0],
+                    "name":              r[1],
+                    "unit":              r[2],
+                    "lower_limit":       r[3],
+                    "upper_limit":       r[4],
+                    "defect_code_low":   r[5],
+                    "defect_code_high":  r[6],
                 }
         except Exception as e:
             print(f"Error al cargar datos: {e}")
@@ -288,7 +291,7 @@ class FormularioPrincipal:
 
     def agregar_datos(self, datos):
         try:
-            attribute_id = conexion.insert_attribute_st20(
+            attribute_id = conexion.insert_attribute_st50_80(
                 datos["name"],
                 datos["unit"],
                 datos["upper_limit"],
@@ -315,7 +318,7 @@ class FormularioPrincipal:
     def actualizar_datos(self, item, datos):
         try:
             attribute_id = self.data[item]["attribute_id"]
-            conexion.update_attribute_st20(
+            conexion.update_attribute_st50_80(
                 attribute_id,
                 datos["name"],
                 datos["unit"],

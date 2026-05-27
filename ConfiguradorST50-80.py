@@ -35,8 +35,8 @@ def apply_theme():
 class ConfiguradorUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Configuración de APIs")
-        self.root.geometry("700x370") 
+        self.root.title("Configuración")
+        self.root.geometry("600x450") 
         self.root.configure(bg=BG_MAIN)
         self.root.focus_force() 
         self.root.attributes("-topmost", False) 
@@ -52,10 +52,12 @@ class ConfiguradorUI:
         header = tk.Frame(self.root, bg=BG_HEADER)
         header.pack(fill="x")
         
-        tk.Label(header, text="⚙ Configurador de URLs para APIs", font=FONT_HEAD, bg=BG_HEADER, fg=FG_WHITE).pack(anchor="w", padx=24, pady=(20, 5))
-        safe_insert = "Todas las APIs son obligatorias."
-        tk.Label(header, text=safe_insert, font=FONT_SUBHEAD, bg=BG_HEADER, fg=FG_WHITE).pack(anchor="w", padx=24, pady=(0, 20))
+        # ACTUALIZADO: Texto del encabezado visual
+        tk.Label(header, text="⚙ Configurador", font=FONT_HEAD, bg=BG_HEADER, fg=FG_WHITE).pack(anchor="w", padx=24, pady=(20, 5))
         
+        self.subtitle_var = tk.StringVar(value="Todos los campos son obligatorios.")
+        tk.Label(header, textvariable=self.subtitle_var, font=FONT_SUBHEAD, bg=BG_HEADER, fg=FG_WHITE).pack(anchor="w", padx=24, pady=(0, 20))
+
         btn_frame = tk.Frame(self.root, bg=BG_BUTTON_BAR)
         btn_frame.pack(fill="x")
         
@@ -74,21 +76,31 @@ class ConfiguradorUI:
         inner.columnconfigure(0, weight=1)
         inner.columnconfigure(1, weight=1)
 
-        # Fila 0 y 1: UNITS e INTERLOCKING
-        tk.Label(inner, text="UNITS", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=0, column=0, sticky="w")
-        tk.Label(inner, text="INTERLOCKING", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=0, column=1, sticky="w", padx=(15,0))
+        # Fila 1: MACHINE NAME e ID OPERATOR
+        tk.Label(inner, text="MACHINE NAME", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=0, column=0, sticky="w")
+        tk.Label(inner, text="ID OPERATOR", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=0, column=1, sticky="w", padx=(15,0))
         
-        self.units = tk.Entry(inner, **entry_kwargs)
-        self.units.grid(row=1, column=0, sticky="ew", ipady=5, pady=(2, 15))
+        self.machine_name = tk.Entry(inner, **entry_kwargs)
+        self.machine_name.grid(row=1, column=0, sticky="ew", ipady=5, pady=(2, 15))
         
-        self.interlocking = tk.Entry(inner, **entry_kwargs)
-        self.interlocking.grid(row=1, column=1, sticky="ew", padx=(15, 0), ipady=5, pady=(2, 15))
+        self.id_operator = tk.Entry(inner, **entry_kwargs)
+        self.id_operator.grid(row=1, column=1, sticky="ew", padx=(15, 0), ipady=5, pady=(2, 15))
 
-        # Fila 2 y 3: TRACEABILITY (Ancho completo)
-        tk.Label(inner, text="TRACEABILITY", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=2, column=0, sticky="w")
+        # Fila 2: MODEL ID y PROCESS NAME
+        tk.Label(inner, text="MODEL ID", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=2, column=0, sticky="w")
+        tk.Label(inner, text="PROCESS NAME", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=2, column=1, sticky="w", padx=(15,0))
         
-        self.traceability = tk.Entry(inner, **entry_kwargs)
-        self.traceability.grid(row=3, column=0, columnspan=2, sticky="ew", ipady=5, pady=(2, 15))
+        self.model_id = tk.Entry(inner, **entry_kwargs)
+        self.model_id.grid(row=3, column=0, sticky="ew", ipady=5, pady=(2, 15))
+        
+        self.process_name = tk.Entry(inner, **entry_kwargs)
+        self.process_name.grid(row=3, column=1, sticky="ew", padx=(15, 0), ipady=5, pady=(2, 15))
+
+        # Fila 3: COMPONENT
+        tk.Label(inner, text="COMPONENT", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=4, column=0, sticky="w")
+        
+        self.component = tk.Entry(inner, **entry_kwargs)
+        self.component.grid(row=5, column=0, sticky="ew", ipady=5, pady=(2, 15))
 
         self.status_var = tk.StringVar(value="Listo")
         status_bar = tk.Label(self.root, textvariable=self.status_var, font=("Segoe UI", 8), bg=BG_MAIN, fg="#888888")
@@ -96,38 +108,42 @@ class ConfiguradorUI:
 
     def cargar(self):
         try:
-            # Llamamos a select_api_configs() para traer las filas de url_data
-            registros = conexion.select_api_configs() 
+            # Apunta a la función renombrada con guion bajo
+            datos = conexion.configuradorst50_80() 
             
-            if registros and registros != "FAILED":
-                # Creamos un diccionario { 'NAME': 'url' } para buscar de forma segura por texto exacto
-                dict_urls = {str(r[2]).strip().upper(): r[3] for r in registros}
+            if datos and datos != "FAILED":
+                def insertar_seguro(entry_widget, valor):
+                    if valor and str(valor).strip() not in ["(NULL)", "None", ""]:
+                        entry_widget.delete(0, tk.END)
+                        entry_widget.insert(0, str(valor).strip())
 
-                # Insertamos la URL correspondiente buscando por la clave exacta de tu BD
-                self.units.delete(0, tk.END)
-                self.units.insert(0, dict_urls.get("UNITS", ""))
-
-                self.interlocking.delete(0, tk.END)
-                self.interlocking.insert(0, dict_urls.get("INTERLOCKING", ""))
-
-                self.traceability.delete(0, tk.END)
-                self.traceability.insert(0, dict_urls.get("TRACEABILITY", ""))
-                    
+                if len(datos) >= 5:
+                    insertar_seguro(self.machine_name, datos[0]) 
+                    insertar_seguro(self.id_operator, datos[1])  
+                    insertar_seguro(self.model_id, datos[2])     
+                    insertar_seguro(self.process_name, datos[3])  
+                    insertar_seguro(self.component, datos[4])     
+                        
         except Exception as e:
-            print(f"Error interno al cargar datos de APIs: {e}")
+            print(f"Error interno al cargar datos: {e}")
     
     def guardar(self):
+        mach = self.machine_name.get().strip()
+        ope  = self.id_operator.get().strip()
+        mod  = self.model_id.get().strip()
+        proc = self.process_name.get().strip()
+        comp = self.component.get().strip()
+ 
         try:
-            # Mandamos la actualización de forma independiente para cada nombre de API
-            conexion.update_api_by_name("UNITS", self.units.get().strip())
-            conexion.update_api_by_name("INTERLOCKING", self.interlocking.get().strip())
-            conexion.update_api_by_name("TRACEABILITY", self.traceability.get().strip())
+            # Apunta a la función renombrada con guion bajo
+            exito = conexion.update_configuratorst50_80(mach, ope, mod, proc, comp)
             
-            messagebox.showinfo("Éxito", "Configuración de APIs guardada correctamente.", parent=self.root)
-            self.root.destroy()
+            if exito:
+                messagebox.showinfo("Éxito", "Configuración guardada correctamente.", parent=self.root)
+                self.root.destroy()
                 
         except Exception as e:
-            messagebox.showerror("Error DB", f"No se pudo guardar: {e}", parent=self.root)
+            messagebox.showerror("Error DB", str(e), parent=self.root)
 
     def cancelar(self):
         self.root.destroy()
