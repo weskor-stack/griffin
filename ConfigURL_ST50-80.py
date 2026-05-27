@@ -97,7 +97,7 @@ class FormularioApiConfig:
                   padx=16, pady=6,
                   cursor="hand2").pack(side="right", padx=(0, 8))
 
-        # --- CONTENEDOR DE CAMPOS (LISTA VERTICAL) ---
+        # --- CONTENEDOR
         self.container = tk.Frame(self.root, bg=BG_MAIN, padx=28, pady=16)
         self.container.grid(row=2, column=0, sticky="nsew")
 
@@ -158,18 +158,29 @@ class FormularioApiConfig:
             print(f"Error al cargar configuración: {e}")
 
     def guardar_todo(self):
-        """Guarda los cambios de cada API."""
         if not messagebox.askyesno("Confirmar", "¿Desea guardar todos los cambios?"):
             return
         try:
+            registros_existentes = conexion.select_api_configs_st50_80()
+            
+            apis_en_bd = set()
+            if registros_existentes and registros_existentes != "FAILED":
+                for r in registros_existentes:
+                    apis_en_bd.add(str(r[2]).strip().upper()) 
+
             for nombre, entry in self.entries.items():
+                nombre_api = nombre.upper()
                 url = entry.get().strip()
-                conexion.update_api_by_name_st50_80(nombre.upper(), url)
+                
+                if nombre_api not in apis_en_bd:
+                    conexion.insert_api_by_name_st50_80(nombre_api, url)
+                else:
+                    conexion.update_api_by_name_st50_80(nombre_api, url)
                 
             messagebox.showinfo("Éxito", "Configuración de APIs guardada correctamente.", parent=self.root)
             self.root.destroy()
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo guardar: {e}", parent=self.root)
+            messagebox.showerror("Error", f"No se pudo guardar la configuración: {e}", parent=self.root)
 
 if __name__ == "__main__":
     root = tk.Tk()

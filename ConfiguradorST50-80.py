@@ -52,7 +52,6 @@ class ConfiguradorUI:
         header = tk.Frame(self.root, bg=BG_HEADER)
         header.pack(fill="x")
         
-        # ACTUALIZADO: Texto del encabezado visual
         tk.Label(header, text="⚙ Configurador", font=FONT_HEAD, bg=BG_HEADER, fg=FG_WHITE).pack(anchor="w", padx=24, pady=(20, 5))
         
         self.subtitle_var = tk.StringVar(value="Todos los campos son obligatorios.")
@@ -76,7 +75,6 @@ class ConfiguradorUI:
         inner.columnconfigure(0, weight=1)
         inner.columnconfigure(1, weight=1)
 
-        # Fila 1: MACHINE NAME e ID OPERATOR
         tk.Label(inner, text="MACHINE NAME", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=0, column=0, sticky="w")
         tk.Label(inner, text="ID OPERATOR", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=0, column=1, sticky="w", padx=(15,0))
         
@@ -86,7 +84,6 @@ class ConfiguradorUI:
         self.id_operator = tk.Entry(inner, **entry_kwargs)
         self.id_operator.grid(row=1, column=1, sticky="ew", padx=(15, 0), ipady=5, pady=(2, 15))
 
-        # Fila 2: MODEL ID y PROCESS NAME
         tk.Label(inner, text="MODEL ID", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=2, column=0, sticky="w")
         tk.Label(inner, text="PROCESS NAME", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=2, column=1, sticky="w", padx=(15,0))
         
@@ -96,7 +93,6 @@ class ConfiguradorUI:
         self.process_name = tk.Entry(inner, **entry_kwargs)
         self.process_name.grid(row=3, column=1, sticky="ew", padx=(15, 0), ipady=5, pady=(2, 15))
 
-        # Fila 3: COMPONENT
         tk.Label(inner, text="COMPONENT", bg=BG_MAIN, fg=FG_BLUE_LABEL, font=FONT_LABEL).grid(row=4, column=0, sticky="w")
         
         self.component = tk.Entry(inner, **entry_kwargs)
@@ -108,7 +104,6 @@ class ConfiguradorUI:
 
     def cargar(self):
         try:
-            # Apunta a la función renombrada con guion bajo
             datos = conexion.configuradorst50_80() 
             
             if datos and datos != "FAILED":
@@ -135,11 +130,17 @@ class ConfiguradorUI:
         comp = self.component.get().strip()
  
         try:
-            # Apunta a la función renombrada con guion bajo
-            exito = conexion.update_configuratorst50_80(mach, ope, mod, proc, comp)
+            datos_actuales = conexion.configuradorst50_80()
+            
+            if datos_actuales == "FAILED" or datos_actuales == ("", "", "", "", ""):
+                exito = conexion.insert_configuratorst50_80(mach, ope, mod, proc, comp)
+                mensaje = "Configuración inicial creada con éxito."
+            else:
+                exito = conexion.update_configuratorst50_80(mach, ope, mod, proc, comp)
+                mensaje = "Configuración ST50-80 actualizada correctamente."
             
             if exito:
-                messagebox.showinfo("Éxito", "Configuración guardada correctamente.", parent=self.root)
+                messagebox.showinfo("Éxito", mensaje, parent=self.root)
                 self.root.destroy()
                 
         except Exception as e:

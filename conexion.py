@@ -2590,7 +2590,7 @@ def select_expiration_time():
         with conn.cursor() as cursor:
             cursor.execute("SELECT expiration_time_id, process_name, defect_code, minute_duration, move_loc FROM expiration_time")
             data = cursor.fetchall()
-        return data  # lista de (expiration_time_id, process_name, defect_code, minute_duration, move_loc)
+        return data  
     except Exception as e:
         print(f"[ERROR] select_expiration_time: {e}")
         return []
@@ -2641,7 +2641,7 @@ def select_attributes_st20():
     )
     data = cursor.fetchall()
     cursor.close()
-    return data  # [0]=attribute_id [1]=name [2]=unit [3]=upper_limit [4]=lower_limit [5]=defect_code
+    return data  
 
 def insert_attribute_st20(name, unit, upper_limit, lower_limit, defect_code):
     """INSERT para la vista ST20. Retorna el ID generado."""
@@ -2713,7 +2713,27 @@ def update_configuratorst50_80(machine_id, operator, model_id, process_name, sho
             conn.rollback()
         raise Exception(f"Fallo en Base de Datos: {e}")
     
+def insert_configuratorst50_80(machine_id, operator, model_id, process_name, shop_order):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            INSERT INTO configurador (machine_id, operator, model_id, process_name, shop_order)
+            VALUES (?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (machine_id, operator, model_id, process_name, shop_order))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al insertar configuración inicial: {e}")
+    
   ####Atributos st50-80
+
 def select_attributes_st50_80():
     """
     NUEVA FUNCIÓN EXCLUSIVA PARA ATRIBUTOS ST50-80
@@ -2816,6 +2836,25 @@ def update_api_by_name_st50_80(api_name, nueva_url):
     except Exception as e:
         if conn: conn.rollback()
         raise Exception(f"Fallo al actualizar URL de la API {api_name}: {e}")
+    
+def insert_api_by_name_st50_80(api_name, url_data):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            INSERT INTO url_data (name, url_data)
+            VALUES (?, ?)
+        """
+        cursor.execute(sql, (api_name, url_data))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al registrar la API {api_name}: {e}")
     
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)

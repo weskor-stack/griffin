@@ -372,8 +372,6 @@ class FormularioPrincipal:
             except Exception as e:
                 messagebox.showerror("Error", f"No se pudo eliminar: {e}")
 
-
-#Entry point 
 if __name__ == "__main__":
     root = tk.Tk()
     app = FormularioPrincipal(root)
