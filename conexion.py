@@ -2590,7 +2590,7 @@ def select_expiration_time():
         with conn.cursor() as cursor:
             cursor.execute("SELECT expiration_time_id, process_name, defect_code, minute_duration, move_loc FROM expiration_time")
             data = cursor.fetchall()
-        return data  # lista de (expiration_time_id, process_name, defect_code, minute_duration, move_loc)
+        return data  
     except Exception as e:
         print(f"[ERROR] select_expiration_time: {e}")
         return []
@@ -2629,7 +2629,9 @@ def delete_expiration_time(expiration_time_id):
             conn.commit()
     except Exception as e:
         print(f"[ERROR] delete_expiration_time: {e}")
-# ATTRIBUTES ST20 — incluye defect_code (Tabla 2.3 del PDF ST20)
+
+
+# ATTRIBUTES ST20
 
 def select_attributes_st20():
     """SELECT para la vista ST20: id, name, unit, upper_limit, lower_limit, defect_code."""
@@ -2639,7 +2641,7 @@ def select_attributes_st20():
     )
     data = cursor.fetchall()
     cursor.close()
-    return data  # [0]=attribute_id [1]=name [2]=unit [3]=upper_limit [4]=lower_limit [5]=defect_code
+    return data  
 
 def insert_attribute_st20(name, unit, upper_limit, lower_limit, defect_code):
     """INSERT para la vista ST20. Retorna el ID generado."""
@@ -2663,6 +2665,197 @@ def update_attribute_st20(attribute_id, name, unit, upper_limit, lower_limit, de
     conn.commit()
     cursor.close()
 
+#CONFIGURADOR ST50-80
+def configuradorst50_80():
+    try:
+        conn = get_connection() 
+        cursor = conn.cursor()  
+        sql = """
+            SELECT machine_id, operator, model_id, process_name, shop_order 
+            FROM configurador 
+            LIMIT 1
+        """
+        cursor.execute(sql)
+        registro = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if registro:
+            return registro
+        else:
+            return ("", "", "", "", "")
+            
+    except Exception as e:
+        print(f"Error en conexion.configuradorst50_80: {e}")
+        return "FAILED"
+
+def update_configuratorst50_80(machine_id, operator, model_id, process_name, shop_order):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            UPDATE configurador 
+            SET machine_id = ?, 
+                operator = ?, 
+                model_id = ?, 
+                process_name = ?, 
+                shop_order = ?
+        """
+        cursor.execute(sql, (machine_id, operator, model_id, process_name, shop_order))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Fallo en Base de Datos: {e}")
+    
+def insert_configuratorst50_80(machine_id, operator, model_id, process_name, shop_order):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            INSERT INTO configurador (machine_id, operator, model_id, process_name, shop_order)
+            VALUES (?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (machine_id, operator, model_id, process_name, shop_order))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al insertar configuración inicial: {e}")
+    
+  ####Atributos st50-80
+
+def select_attributes_st50_80():
+    """
+    NUEVA FUNCIÓN EXCLUSIVA PARA ATRIBUTOS ST50-80
+    Trae las columnas en el orden exacto para que coincidan con la interfaz.
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            SELECT attribute_id, name, unit, lower_limit, upper_limit, defect_code, defect_code_high 
+            FROM attribute
+        """
+        cursor.execute(sql)
+        registros = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        return registros
+    except Exception as e:
+        print(f"Error en select_attributes_st50_80: {e}")
+        return []
+
+def insert_attribute_st50_80(name, unit, upper_limit, lower_limit, defect_code_low, defect_code_high):
+    """
+    NUEVA FUNCIÓN EXCLUSIVA PARA ATRIBUTOS ST50-80
+    Inserta los 6 valores requeridos en la tabla 'attribute'.
+    """
+    try:
+        conn = get_connection()
+        with conn.cursor() as cursor:
+            sql = """
+                INSERT INTO attribute (name, unit, upper_limit, lower_limit, defect_code, defect_code_high)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """
+            cursor.execute(sql, (name, unit, upper_limit, lower_limit, defect_code_low, defect_code_high))
+            conn.commit()
+            return cursor.lastrowid
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Error al insertar atributo ST50-80: {e}")
+
+def update_attribute_st50_80(attribute_id, name, unit, upper_limit, lower_limit, defect_code_low, defect_code_high):
+    try:
+        conn = get_connection()
+        with conn.cursor() as cursor:
+            sql = """
+                UPDATE attribute 
+                SET name = ?, 
+                    unit = ?, 
+                    upper_limit = ?, 
+                    lower_limit = ?, 
+                    defect_code = ?, 
+                    defect_code_high = ?
+                WHERE attribute_id = ?
+            """
+            cursor.execute(sql, (name, unit, upper_limit, lower_limit, defect_code_low, defect_code_high, attribute_id))
+            conn.commit()
+            conn.close()
+            return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Error al actualizar atributo ST50-80: {e}")
+
+
+#Configurador urls
+def select_api_configs_st50_80():
+
+    try:
+        conn   = get_connection()
+        cursor = conn.cursor()
+        sql = "SELECT url_data_id, tc_id, name, url_data FROM url_data ORDER BY url_data_id ASC"
+        cursor.execute(sql)
+        rows = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        return rows
+    except Exception as e:
+        print(f"Error en select_api_configs_st50_80: {e}")
+        return "FAILED"
+
+def update_api_by_name_st50_80(api_name, nueva_url):
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            UPDATE url_data 
+            SET url_data = ? 
+            WHERE name = ?
+        """
+        cursor.execute(sql, (nueva_url, api_name))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al actualizar URL de la API {api_name}: {e}")
+    
+def insert_api_by_name_st50_80(api_name, url_data):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            INSERT INTO url_data (name, url_data)
+            VALUES (?, ?)
+        """
+        cursor.execute(sql, (api_name, url_data))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al registrar la API {api_name}: {e}")
+    
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
 # parameters_electrical(['Ct', '50', '10', '100', 'Numeric', 'N', 'OK', 'Comentarios'],name)
