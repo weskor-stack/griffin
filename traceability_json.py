@@ -1,6 +1,25 @@
 import json
 import conexion
 import rfc3339
+from datetime import datetime
+
+
+def formato_fecha_st5080(valor):
+    """Formato de fecha/hora para ST50/80: MM/DD/YYYY hh:mm:ss AM/PM (12 horas)."""
+    if valor in (None, ""):
+        return ""
+    # Si llega como objeto datetime, formatear directo
+    try:
+        return valor.strftime("%m/%d/%Y %I:%M:%S %p")
+    except AttributeError:
+        pass
+    # Si llega como string, intentar parsear formatos comunes de BD
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(str(valor), fmt).strftime("%m/%d/%Y %I:%M:%S %p")
+        except ValueError:
+            continue
+    return str(valor)
 
 def evaluar_codigo_defecto(val_plc, low_lim, high_lim, plc_defect_code, test_name, atributos_db):
     if low_lim in (None, "") or high_lim in (None, ""):
@@ -134,58 +153,17 @@ def traceability_station_20(parent_serial_number, parent_part_number, heater_ser
 
     return estructura_json
 
-def interlocking_station_50_80(parent_serial_number, parent_part_number, component_pn):
-    """
-    API INTERLOCKING para ST50 / ST80 (Loading & Pressing) — PDF Seq 5
-    Parámetros:
-        parent_serial_number : Serial escaneado del Top Level.
-        parent_part_number   : Part number del Top Level (obtenido de API Unit - Top Level).
-        component_pn         : Part number del componente (obtenido de API Unit - Component).
-    """
-    config = conexion.configurador()
-    if not config or config == "FAILED":
-        return "Error: No se encontró configuración."
 
-    machine_id   = config[0]   # MACHINE_NAME
-    process_name = config[1]   # PROCESS_NAME
-    operator     = config[2]   # ID_OPERATOR
-    model_id     = config[4]   # MODEL_ID
-
-    estructura_json = {
-        "serial":       parent_serial_number,
-        "product":      parent_part_number,
-        "station":      machine_id,
-        "operator":     operator,
-        "process_name": process_name,
-        "location":     "",
-        "test_steps": {
-            "unit_information": [
-                {
-                    "name":  "station_id",
-                    "value": machine_id
-                },
-                {
-                    "name":  "model_id",
-                    "value": model_id
-                },
-                {
-                    "name":  "component_partnumber",
-                    "value": component_pn
-                }
-            ]
-        }
-    }
-
-    return estructura_json
-
-
-def traceability_station_50_80(parent_serial_number, parent_part_number, component_serial_number, plc_defect_code):
+def traceability_station_50_80(serial_number, parent_serial_number, parent_part_number, component_serial_number, plc_defect_code):
     """
     API TRACEABILITY para ST50 / ST80 (Loading & Pressing) — PDF Seq 6
     Parámetros:
-        parent_serial_number    : Serial escaneado del Top Level.
-        parent_part_number      : Part number del Top Level (obtenido de API Unit).
-        component_serial_number : Serial escaneado del componente.
+        serial_number           : Serial ESCANEADO de la pieza padre (1er escaneo).
+                                  Es el que se busca en la tabla 'part' de la BD y
+                                  el que va en el campo "serial" del JSON.
+        parent_serial_number    : Serial de la pieza padre obtenido de la API Unit.
+        parent_part_number      : Part number del Top Level (obtenido de API Unit) -> "product".
+        component_serial_number : Serial escaneado del componente (2do escaneo).
         plc_defect_code         : Código de defecto por defecto del PLC.
     Valores de medición y límites obtenidos directamente de BD (pressfit + inspection).
     """
@@ -199,14 +177,15 @@ def traceability_station_50_80(parent_serial_number, parent_part_number, compone
     program_name    = config[4]   # PROGRAM_ID (model_id)
     component_label = config[8]   # COMPONENT label (shop_order)
 
-    part = conexion.obtener_parte(parent_serial_number)
+    # Se busca con el serial ESCANEADO (pieza padre), que es el almacenado en la tabla 'part'.
+    # NO con parent_serial_number (ese viene de la API y no existe en la BD local).
+    part = conexion.obtener_parte(serial_number)
     if not part or part == "FAILED":
-        return f"Error: No se encontró la pieza {parent_serial_number}"
+        return f"Error: No se encontró la pieza {serial_number}"
 
     part_id    = part[0]
     start_time = part[3]
-    last_digit = str(start_time).split('-')
-    timer      = rfc3339.rfc3339(start_time, utc=True, use_system_timezone=False) + " " + last_digit[-1]
+    timer      = formato_fecha_st5080(start_time)   # MM/DD/YYYY hh:mm:ss AM/PM
 
     station_info = conexion.stations()
     if not station_info:
@@ -250,12 +229,12 @@ def traceability_station_50_80(parent_serial_number, parent_part_number, compone
     agregar_steps(conexion.inspection_data3(part_id), 11, 10, 2, 3, 5, 6, 7)
 
     estructura_json = {
-        "serial":       parent_serial_number,
+        "serial":       serial_number,
         "product":      parent_part_number,
         "station":      machine_id,
         "operator":     operator,
-        "start_time":   str(timer)    if timer    else "",
-        "end_time":     str(end_time) if end_time else "",
+        "start_time":   timer,
+        "end_time":     formato_fecha_st5080(end_time),
         "process_name": process_name,
         "status":       status_general,
         "test_steps": {
