@@ -283,10 +283,12 @@ def traceability_station_50_80(serial_number, parent_serial_number, parent_part_
 #         print(f"\nError:\n{resultado_json}")
 
 if __name__ == "__main__":
-    resultado = interlocking_station_50_80(
-        parent_serial_number = "P1517040-01-G:REV01:SANN26097000001",
-        parent_part_number   = "2102110-00-C",
-        component_pn         = "COMPONENT-1"
+    resultado = traceability_station_50_80(
+        serial_number           = "P1517040-01-G:REV01:SANN26097000001",
+        parent_serial_number    = "Z2-01",
+        parent_part_number      = "2102110-00-C",
+        component_serial_number = "COMPONENT-1",
+        plc_defect_code         = "PLC_DEFAULT_001"
     )
     if isinstance(resultado, dict):
         print(json.dumps(resultado, indent=4))
