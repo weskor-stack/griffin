@@ -53,12 +53,12 @@ def json_file(parte):
     divisor = name.index(":")
 
     flowversion = 1
-    flowstepname = "PEGATRON" #"DummyGoldenStateFlow" #model[2][1]
-    flowname = "PEGATRON" #"DummyGoldenStateFlow"
+    flowstepname = "SANMINA" #"DummyGoldenStateFlow" #model[2][1]
+    flowname = "SANMINA" #"DummyGoldenStateFlow"
     actorname = conexion.model() #get_name_PC.getName()
     actorname = actorname[0][2]
     actorversion = ""
-    actorlocation = "Pegatron - MX"
+    actorlocation = "Sanmina - MX"
 
     # if type_station == 1:
     #     screwing = conexion.screwing_data(piece_id)

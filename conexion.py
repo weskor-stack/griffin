@@ -8,33 +8,136 @@ from datetime import datetime
 import mariadb
 import sys
 from tkinter import  messagebox 
+import time
+import logging
 # import history_xlsx
 
-# Connect to MariaDB Platform
+# Configurar logging básico si no existe
 try:
-    conn = mariadb.connect(
-        user="root",
-        password="u8ch9Xn4Ol8woLw3E2A6",
-        host="127.0.0.1",
-        port=3306,
-        database="data_tracking_griffin")
+    logging.info("Inicializando módulo de conexión a BD")
+except:
+    logging.basicConfig(level=logging.INFO)
 
-except mariadb.Error as e:
-    # print(f"Error connecting to MariaDB Platform: {e}")
-    messagebox.showerror(title="Connection", message=f"Check database connection", )
-    sys.exit(1)
+class DatabaseManager:
+    """Gestor de conexión a BD con reconexión automática"""
+    
+    def __init__(self):
+        self.connection = None
+        self.config = {
+            "user": "root",
+            "password": "u8ch9Xn4Ol8woLw3E2A6",
+            "host": "127.0.0.1",
+            "port": 3306,
+            "database": "data_tracking_griffin",
+            "connect_timeout": 10,
+            "pool_name": "my_pool",
+            "pool_size": 3
+        }
+        self._connect()
+    
+    def _connect(self):
+        """Establece conexión inicial"""
+        try:
+            if self.connection:
+                try:
+                    self.connection.close()
+                except:
+                    pass
+            
+            self.connection = mariadb.connect(**self.config)
+            # Configurar auto-reconnect y timeouts más largos
+            cursor = self.connection.cursor()
+            cursor.execute("SET SESSION wait_timeout = 28800")  # 8 horas
+            cursor.execute("SET SESSION interactive_timeout = 28800")
+            cursor.execute("SET SESSION net_read_timeout = 300")
+            cursor.execute("SET SESSION net_write_timeout = 300")
+            cursor.close()
+            
+            logging.info("✅ Conexión a BD establecida correctamente")
+            print("✅ Conexión a BD establecida correctamente")
+            
+        except mariadb.Error as e:
+            logging.error(f"❌ Error conectando a BD: {e}")
+            print(f"❌ Error conectando a BD: {e}")
+            messagebox.showerror(
+                title="Error de Conexión", 
+                message="No se pudo conectar a la base de datos. Verifica que MariaDB esté ejecutándose."
+            )
+            sys.exit(1)
+    
+    def _ensure_connection(self):
+        """Verifica y reconecta si es necesario"""
+        try:
+            # Probar si la conexión está viva
+            if self.connection is None:
+                logging.warning("Conexión nula, reconectando...")
+                self._connect()
+                return
+            
+            self.connection.ping(reconnect=True)
+            
+        except (mariadb.Error, AttributeError) as e:
+            logging.warning(f"Conexión perdida: {e}. Reconectando...")
+            try:
+                self._connect()
+            except Exception as reconnect_error:
+                logging.error(f"Error al reconectar: {reconnect_error}")
+                raise
+    
+    def get_cursor(self):
+        """Obtiene un cursor válido (con reconexión automática)"""
+        self._ensure_connection()
+        return self.connection.cursor()
+    
+    def commit(self):
+        """Commit con verificación de conexión"""
+        self._ensure_connection()
+        self.connection.commit()
+    
+    def close(self):
+        """Cierra la conexión"""
+        if self.connection:
+            try:
+                self.connection.close()
+                logging.info("Conexión a BD cerrada")
+            except:
+                pass
 
-# Get Cursor
-# cur = conn.cursor()
-def obtener_datos_fila_unica():
-    try:
-        cursor = conn.cursor()
-        # Aquí pedimos explícitamente los 6 datos:
-        cursor.execute("SELECT machine_id, process_name, operator, station, product, shop_order FROM configurador LIMIT 1")
-        return cursor.fetchone()
-    except Exception as e:
-        print(f"Error: {e}")
-        return None
+# Instancia global del gestor
+db_manager = DatabaseManager()
+
+def get_connection():
+    """Obtiene la conexión actual (con reconexión automática)"""
+    db_manager._ensure_connection()
+    return db_manager.connection
+
+# Mantener compatibilidad con código existente
+conn = db_manager.connection
+# Connect to MariaDB Platform
+# try:
+#     conn = mariadb.connect(
+#         user="root",
+#         password="u8ch9Xn4Ol8woLw3E2A6",
+#         host="127.0.0.1",
+#         port=3306,
+#         database="data_tracking_griffin")
+
+# except mariadb.Error as e:
+#     # print(f"Error connecting to MariaDB Platform: {e}")
+#     messagebox.showerror(title="Connection", message=f"Check database connection", )
+#     sys.exit(1)
+
+# # Get Cursor
+# # cur = conn.cursor()
+# def obtener_datos_fila_unica():
+#     try:
+#         cursor = conn.cursor()
+#         # Aquí pedimos explícitamente los 6 datos:
+#         cursor.execute("SELECT machine_id, process_name, operator, station, product, shop_order FROM configurador LIMIT 1")
+#         return cursor.fetchone()
+#     except Exception as e:
+#         print(f"Error: {e}")
+#         return None
     
 # def insert_simple(machine, process, operator, station):
 #URLs
@@ -133,13 +236,14 @@ def obtener_url_api():
     """Busca la URL en la tabla url_data"""
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT url_data FROM url_data LIMIT 1")
-        res = cursor.fetchone()
+        cursor.execute("SELECT url_data FROM url_data")
+        #res = cursor.fetchone()
+        res = cursor.fetchall()
         cursor.close()
-        return res[0] if res else None
+        return res
     except:
         return None
-    
+
 def insert_attribute(name, unit, upper, lower, value, create_registration):
     cursor = conn.cursor()
     sql = """
@@ -2664,6 +2768,46 @@ def update_attribute_st20(attribute_id, name, unit, upper_limit, lower_limit, de
     )
     conn.commit()
     cursor.close()
+
+#########################################TRACCEABILITY AACMBIOS###############################################################################
+
+def verificar_cantidad_componentes(serial_padre):
+    """
+    Cuenta los componentes guardados para la pieza actual y los compara con qty_components.
+    Retorna True si está COMPLETO (>=), False si está INCOMPLETO (<).
+    """
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT qty_components FROM configurador LIMIT 1")
+        config = cursor.fetchone()
+
+        if not config:
+            cursor.close()
+            return False
+        
+        qty_requerida = int(config[0]) if str(config[0]).isdigit() else 0
+        cursor.execute("SELECT part_id FROM part WHERE part_number = ? ORDER BY part_id DESC LIMIT 1", (serial_padre,))
+        part = cursor.fetchone()
+
+        if not part:
+            cursor.close()
+            return False
+        part_id = part[0]
+
+        cursor.execute("SELECT COUNT(*) FROM component WHERE part_id = ?", (part_id,))
+        cantidad_actual = cursor.fetchone()[0]
+        cursor.close()
+
+        print(f"[VERIFY] Escaneados: {cantidad_actual} / Requeridos: {qty_requerida}")
+        return cantidad_actual >= qty_requerida
+
+    except mariadb.Error as e:
+        print(f"[DB ERROR] verificar_cantidad_componentes: {e}")
+        return False
+    except Exception as e:
+        print(f"[ERROR] verificar_cantidad_componentes: {e}")
+        return False
+    
 
 #CONFIGURADOR ST50-80
 def configuradorst50_80():
