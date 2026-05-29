@@ -23,7 +23,7 @@ def evaluar_codigo_defecto(val_plc, low_lim, high_lim, plc_defect_code, test_nam
         
     return plc_defect_code
 
-def interlocking_station_20(serial_number, parent_serial_number, parent_part_number, heater_serial_number, plc_value, plc_defect_code):
+def traceability_station_20(serial_number,parent_serial_number, parent_part_number, heater_serial_number, plc_value, plc_defect_code):
     
     config = conexion.configurador()
     if not config or config == "FAILED":
@@ -57,50 +57,16 @@ def interlocking_station_20(serial_number, parent_serial_number, parent_part_num
     atributos_db = conexion.atributos()
     test_steps_array = []
 
-def traceability_station_50_80(serial_number, parent_serial_number, parent_part_number, heater_serial_number, plc_value, plc_defect_code):
-    
-    config = conexion.configuradorst50_80()
-    if not config or config == "FAILED":
-        return "Error: No se encontró configuración."
-        
-    machine_id = config[0]         
-    process_name = config[3]       
-    operator = config[1]
-    model_id = config[2]           
-    component = config[4]
-    prog_id = config[5]      
-
-    part = conexion.obtener_parte(serial_number)
-    if not part or part == "FAILED":
-        return f"Error: No se encontró la pieza {serial_number}"
-        
-    part_id = part[0]
-    start_time = part[3]
-    last_digit = str(start_time).split('-')
-    timer = rfc3339.rfc3339(start_time, utc=True, use_system_timezone=False) + " " + last_digit[-1]       
-
-    station_info = conexion.stations()
-    if not station_info:
-        return "Error: No hay estaciones activas."
-        
-    station_id = station_info[0]
-    type_station = station_info[4]
-
-    duration = conexion.duration_json(station_id, part_id)
-    status_general = duration[0] if duration else ""
-    end_time = duration[1] if duration else ""
-
-    atributos_db = conexion.atributos()
-    test_steps_array = []
-
-    def agregar_steps(data_list, name_idx, desc_idx, low_idx, high_idx, unit_idx, status_idx, val_source):
+    def agregar_steps(data_list, name_idx, desc_idx, low_idx, high_idx, unit_idx, status_idx, val_source, defect_code_idx):
         for x in data_list:
             low = x[low_idx] if low_idx is not None else ""
             high = x[high_idx] if high_idx is not None else ""
-            val = x[val_source] if isinstance(val_source, int) else val_source
+            val = x[val_source] if val_source is not None else ""
             test_name = x[name_idx]
             
-            codigo_defecto = evaluar_codigo_defecto(val, low, high, plc_defect_code, test_name, atributos_db)
+            defect_code_value = x[defect_code_idx] if defect_code_idx is not None else ""
+            
+            # codigo_defecto = evaluar_codigo_defecto(val, low, high, plc_defect_code, test_name, atributos_db)
 
             test_steps_array.append({
                 "name": test_name,                                           
@@ -111,24 +77,24 @@ def traceability_station_50_80(serial_number, parent_serial_number, parent_part_
                 "units": x[unit_idx] if unit_idx is not None else "",
                 "status": x[status_idx] if status_idx is not None else "PASSED",
                 "value": val,
-                "defect_code": codigo_defecto
+                "defect_code": defect_code_value
             })
 
     if type_station == 1 or type_station == 4: 
-        agregar_steps(conexion.screwing_data(part_id), 11, 11, 2, 3, 5, 6, plc_value)
+        agregar_steps(conexion.screwing_data(part_id), 11, 11, 2, 3, 5, 6, 1, 9)
         
     if type_station == 2 or type_station == 4: 
-        agregar_steps(conexion.pressfit_data(part_id), 11, 11, 2, 3, 5, 6, plc_value)
+        agregar_steps(conexion.pressfit_data(part_id), 11, 11, 2, 3, 5, 6, 1, 9)
         
     if type_station == 3 or type_station == 4: 
-        agregar_steps(conexion.inspection_data(part_id), 11, 11, 2, 3, 5, 6, plc_value)
+        agregar_steps(conexion.inspection_data3(part_id), 11, 11, 2, 3, 5, 6, 1, 9)
         
     if type_station == 4: 
-        agregar_steps(conexion.electrical_data(part_id), 11, 11, 2, 3, 5, 6, plc_value)
-        agregar_steps(conexion.continuity_data(part_id), 0, 0, 3, 4, 5, 6, 7)
-        agregar_steps(conexion.leaktest_data(part_id), 0, 0, None, None, 4, 3, 2)
-        agregar_steps(conexion.welding_data(part_id), 0, 0, None, None, 6, 5, 2)
-        agregar_steps(conexion.temperature_data(part_id), 0, 0, 9, 10, 5, None, 4)
+        agregar_steps(conexion.electrical_data(part_id), 11, 11, 2, 3, 5, 6, 1, 9)
+        agregar_steps(conexion.continuity_data(part_id), 0, 0, 3, 4, 5, 6, 7, 8)
+        agregar_steps(conexion.leaktest_data(part_id), 0, 0, None, None, 4, 3, 2, 5)
+        agregar_steps(conexion.welding_data(part_id), 0, 0, None, None, 6, 5, 2, 7)
+        agregar_steps(conexion.temperature_data(part_id), 0, 0, 9, 10, 5, None, 4, 8)
 
     estructura_json = {
         "serial": parent_serial_number,
@@ -145,9 +111,16 @@ def traceability_station_50_80(serial_number, parent_serial_number, parent_part_
         "commands": []
     }
 
+    if program_name and str(program_name).strip() != "":
+        estructura_json["commands"].append({
+            "command": "ReplaceNontrackedComponent",
+            "ref_designator": str(process_name)+"_Program_Name_Version",
+            "component_id": program_name
+        })
+
     estructura_json["commands"].append({
         "command": "ReplaceNontrackedComponent",
-        "ref_designator": f"{process_name}_Station ID",
+        "ref_designator": f"{process_name}__Machine_ID",
         "component_id": machine_id
     })
 
@@ -160,21 +133,22 @@ def traceability_station_50_80(serial_number, parent_serial_number, parent_part_
 
     estructura_json["commands"].append({
         "command": "ReplaceTrackedComponent",
-        "ref_designator": f"{process_name}_{component}",
+        "ref_designator": f"{process_name}_heater_serial_number",
+        "workstation": "COMP",
         "component_id": heater_serial_number
     })
 
     return estructura_json
 
-if __name__ == "__main__":
-    resultado_json = traceability_station_50_80(
-        serial_number = "P2173404-00-C:SEYU26061A0765",
-        parent_serial_number="P1106394-71-P:SE4A25079000001",
-        parent_part_number="1231284792783",           
-        heater_serial_number="P2170207-00-E:SE4A26127000245", 
-        plc_value="2.33",                                      
-        plc_defect_code="PLC_DEFAULT_001"
-    )
+# if __name__ == "__main__":
+#     resultado_json = traceability_station_20(
+#         serial_number="P1517040-01-G:REV01:SANN26097000001",
+#         parent_serial_number="P1135558-04-A:SANN26097000001",
+#         parent_part_number="LFTM1135558-04-A",           
+#         heater_serial_number="P2034365-C0-B:SFY0000TEST001", 
+#         plc_value="2.33",                                      
+#         plc_defect_code="PLC_DEFAULT_001"
+#     )
     
     if isinstance(resultado_json, dict):
         print(json.dumps(resultado_json, indent=4))

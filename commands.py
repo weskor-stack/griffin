@@ -7,9 +7,9 @@ __version__ = "v2.0.0"
 import conexion
 
 
-pressfit = "commit,Pressfit,F,50,10,100,Numeric,N,PASSED,Comentarios,dwell_time,D,500,498,502,Numeric,mm,PASSED,Comentarios,dwell_time,S,100,95,110,Numeric,mm/s,PASSED,Comentarios,dwell_time,P2173404-00-C:SEYU26061A0764,1/"
+pressfit = "commit,Pressfit,F,270.00,70.00,174.35,Numeric,N,PASSED,,,D,0.1,5.0,0.50,Numeric,mms,PASSED,,,PIN1,,,,,,,,,PIN2,,,,,,,,,PIN3,,,,,,,,,PIN4,,,,,,,,,P2170217-00-E:SE4A26120000117,1/"
 screwing = "commit,Screwing,T,1.25,1,1.8,Numeric,N,PASSED,Comentario,A,31250,2900,3500,Numeric,degrees,FAILED,Comentario,PX,50,47,55,Numeric,mm,PASSED,Comentario,PY,150,140,160,Numeric,mm,PASSED,Comentario,4,P2173404-00-C:SEYU26061A0765,1/"
-inspection_vs = "commit,Inspection,VS,M,8000,7500,8500,Numeric,N,PASSED,Comentarios,PX,500,475,525,Numeric,mm,PASSED,Comentarios,PY,500,475,525,Numeric,mm,PASSED,Comentarios,P2173404-00-C:SEYU26061A0766,1/"
+inspection_vs = "commit,Inspection,VS,M,8000,7500,8500,Numeric,N,PASSED,defect_code,PX,500,475,525,Numeric,mm,PASSED,Comentarios,PY,500,475,525,Numeric,mm,PASSED,Comentarios,P2173404-00-C:SEYU26061A0766,1/"
 inspection_xt = "commit,Inspection,XT,PX,500,475,525,Numeric,mm,PASSED,Comentarios,PY,500,475,525,Numeric,mm,PASSED,Comentarios,CPC,400,395,405,Numeric,mm,PASSED,Comentarios,CPE,400,395,405,Numeric,mm,PASSED,Comentarios,CAD,1,1,1,Boolean,DBU,PASSED,Comentarios,P2173404-00-C:SEYU26061A0765,1/"
 electrical = "commit,Electrical,Ct,1.25,1,1.8,Numeric,N,OK,Comentario,V,31250,2900,3500,Numeric,degrees,FAILED,Comentario,Cr,50,47,55,Numeric,mm,PASSED,Comentario,R,150,140,160,Numeric,mm,PASSED,Comentario,P2173404-00-C:SEYU26061A0765,1/"
 
@@ -18,7 +18,7 @@ continuity_ok = 'commit,Continuity,Continuity1,10,50,F,PASS,20,Ejemplo de error 
 continuity_fail = 'commit,Continuity,Continuity1,10,50,F,FAIL,5,Ejemplo de error del defecto,1/'
 
 leak1 = "commit,Leak,tiempo_prueba,resultado,PASSED/FAILED,unit,descripcion,extra1,extra2,1/"
-leak2 = "commit,Leak,Numeric,14.25,PASSED,psi,DESCRIPCION,1.0,1.0,Leak,P2173404-00-C:SEYU26061A0765,1/"
+leak2 = "commit,Leak,Numeric,14.25,PASSED,psi,defect_code,1.0,1.0,Leak,P2173404-00-C:SEYU26061A0765,1/"
 temperatura = "commit,Temperature,start (timestamp),salida al proceso (timestamp),temp_inicial,temp_final,unit,descripcion,extra1,extra2,P2173404-00-C:SEYU26061A0765,1/"
 welding = 'commit,Welding,welding_time,welding_power,100,mm,PASSED,description,P2173404-00-C:SEYU26061A0765,1/'
 
