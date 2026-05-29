@@ -1,4 +1,5 @@
 import json
+from logging import config
 import conexion
 import rfc3339
 
@@ -22,7 +23,7 @@ def evaluar_codigo_defecto(val_plc, low_lim, high_lim, plc_defect_code, test_nam
         
     return plc_defect_code
 
-def interlocking_station_20(parent_serial_number, parent_part_number, heater_serial_number, plc_value, plc_defect_code):
+def interlocking_station_20(serial_number, parent_serial_number, parent_part_number, heater_serial_number, plc_value, plc_defect_code):
     
     config = conexion.configurador()
     if not config or config == "FAILED":
@@ -33,9 +34,45 @@ def interlocking_station_20(parent_serial_number, parent_part_number, heater_ser
     operator = config[2]           
     program_name = config[4]       
 
-    part = conexion.obtener_parte(parent_serial_number)
+    part = conexion.obtener_parte(serial_number)
     if not part or part == "FAILED":
-        return f"Error: No se encontró la pieza {parent_serial_number}"
+        return f"Error: No se encontró la pieza {serial_number}"
+        
+    part_id = part[0]
+    start_time = part[3]
+    last_digit = str(start_time).split('-')
+    timer = rfc3339.rfc3339(start_time, utc=True, use_system_timezone=False) + " " + last_digit[-1]       
+
+    station_info = conexion.stations()
+    if not station_info:
+        return "Error: No hay estaciones activas."
+        
+    station_id = station_info[0]
+    type_station = station_info[4]
+
+    duration = conexion.duration_json(station_id, part_id)
+    status_general = duration[0] if duration else ""
+    end_time = duration[1] if duration else ""
+
+    atributos_db = conexion.atributos()
+    test_steps_array = []
+
+def traceability_station_50_80(serial_number, parent_serial_number, parent_part_number, heater_serial_number, plc_value, plc_defect_code):
+    
+    config = conexion.configuradorst50_80()
+    if not config or config == "FAILED":
+        return "Error: No se encontró configuración."
+        
+    machine_id = config[0]         
+    process_name = config[3]       
+    operator = config[1]
+    model_id = config[2]           
+    component = config[4]
+    prog_id = config[5]      
+
+    part = conexion.obtener_parte(serial_number)
+    if not part or part == "FAILED":
+        return f"Error: No se encontró la pieza {serial_number}"
         
     part_id = part[0]
     start_time = part[3]
@@ -66,7 +103,7 @@ def interlocking_station_20(parent_serial_number, parent_part_number, heater_ser
             codigo_defecto = evaluar_codigo_defecto(val, low, high, plc_defect_code, test_name, atributos_db)
 
             test_steps_array.append({
-                "name": test_name,                           
+                "name": test_name,                                           
                 "description": x[desc_idx] if desc_idx is not None else test_name, 
                 "comparator": "GELE",
                 "lowLimit": low,
@@ -98,50 +135,48 @@ def interlocking_station_20(parent_serial_number, parent_part_number, heater_ser
         "product": parent_part_number, 
         "station": machine_id,
         "operator": operator,
-        "password": "",
         "start_time": str(timer) if timer else "",
         "end_time": str(end_time) if end_time else "",
-        "type": "PRODUCTION",
         "process_name": process_name,
         "status": status_general,
-        "commands": [],
         "test_steps": {
-            machine_id: test_steps_array
-        }
+            "STEPS LIST": test_steps_array
+        },
+        "commands": []
     }
-
-    if program_name and str(program_name).strip() != "":
-        estructura_json["commands"].append({
-            "command": "ReplaceNontrackedComponent",
-            "ref_designator": program_name,
-            "component_id": program_name
-        })
 
     estructura_json["commands"].append({
         "command": "ReplaceNontrackedComponent",
-        "ref_designator": f"{process_name}_{machine_id}",
+        "ref_designator": f"{process_name}_Station ID",
         "component_id": machine_id
+    })
+
+    prog_id = str(prog_id).strip() if prog_id else "default_program"
+    estructura_json["commands"].append({
+        "command": "ReplaceNontrackedComponent",
+        "ref_designator": f"{process_name}_Program ID",
+        "component_id": prog_id
     })
 
     estructura_json["commands"].append({
         "command": "ReplaceTrackedComponent",
-        "ref_designator": f"{process_name}_{heater_serial_number}",
-        "workstation": "COMP",
+        "ref_designator": f"{process_name}_{component}",
         "component_id": heater_serial_number
     })
 
     return estructura_json
 
-# if __name__ == "__main__":
-#     resultado_json = interlocking_station_20(
-#         parent_serial_number="P1106394-71-P:SE4A25079000001",
-#         parent_part_number="1231284792783",           
-#         heater_serial_number="P2170207-00-E:SE4A26127000245", 
-#         plc_value="2.33",                                      
-#         plc_defect_code="PLC_DEFAULT_001"
-#     )
+if __name__ == "__main__":
+    resultado_json = traceability_station_50_80(
+        serial_number = "P2173404-00-C:SEYU26061A0765",
+        parent_serial_number="P1106394-71-P:SE4A25079000001",
+        parent_part_number="1231284792783",           
+        heater_serial_number="P2170207-00-E:SE4A26127000245", 
+        plc_value="2.33",                                      
+        plc_defect_code="PLC_DEFAULT_001"
+    )
     
-#     if isinstance(resultado_json, dict):
-#         print(json.dumps(resultado_json, indent=4))
-#     else:
-#         print(f"\nError:\n{resultado_json}")
+    if isinstance(resultado_json, dict):
+        print(json.dumps(resultado_json, indent=4))
+    else:
+        print(f"\nError:\n{resultado_json}")

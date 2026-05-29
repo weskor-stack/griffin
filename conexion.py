@@ -133,10 +133,10 @@ def obtener_url_api():
     """Busca la URL en la tabla url_data"""
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT url_data FROM url_data LIMIT 1")
-        res = cursor.fetchone()
+        cursor.execute("SELECT url_data FROM url_data")
+        res = cursor.fetchall()
         cursor.close()
-        return res[0] if res else None
+        return res
     except:
         return None
     
@@ -2347,7 +2347,7 @@ def configurador():
         cursor = conn.cursor()
         cursor.execute("""
             SELECT machine_id, process_name, operator, station, 
-                   program_name_version, qty_components, client_id, password 
+                   program_name_version, qty_components, client_id, password, shop_order, model_id, 
             FROM configurador 
             LIMIT 1
         """)
@@ -2671,7 +2671,7 @@ def configuradorst50_80():
         conn = get_connection() 
         cursor = conn.cursor()  
         sql = """
-            SELECT machine_id, operator, model_id, process_name, shop_order 
+            SELECT machine_id, operator, model_id, process_name, shop_order, program_name_version 
             FROM configurador 
             LIMIT 1
         """
