@@ -96,6 +96,25 @@ def configurar_logging():
     
     return logger
 
+def keep_alive_database():
+    """Mantiene viva la conexión a la base de datos"""
+    try:
+        # Ejecutar una consulta simple cada 5 minutos
+        with conexion.conn.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        logging.debug("Keep-alive ejecutado")
+    except Exception as e:
+        logging.warning(f"Keep-alive falló: {e}")
+        # Intentar reconectar
+        try:
+            conexion.db_manager._connect()
+        except:
+            pass
+    
+    # Programar próximo keep-alive (5 minutos)
+    root.after(300000, keep_alive_database)
+
 logger = configurar_logging()
 
 
@@ -307,10 +326,10 @@ amc_label.place(x=1120, y=610)
 
 
 label_user = ctk.CTkLabel(master=frame, text="User:")
-label_user.place(x=1050, y=250)
+# label_user.place(x=1050, y=250)
 
 label_users = ctk.CTkLabel(master=frame, text="Admin")
-label_users.place(x=1090, y=250)
+# label_users.place(x=1090, y=250)
 
 headers = [["Measurement","Value","Lower limit","Upper limit","Type","Unit","Result"]]
 
@@ -753,7 +772,7 @@ def worker(conn, addr):
                                             heater_part_number_to_send     # Part number del componente (único o el primero)
                                         )
                                         
-                                        logging.info(f"Interlocking JSON: {interlocking_json_api}")
+                                        logging.info(f"Interlocking JSON: {json.dumps(interlocking_json_api, indent=4)}")
                                         
                                         response_interlocking = requests.post(
                                             url_interlocking,
@@ -809,6 +828,7 @@ JSON: \n{json.dumps(interlocking_json_api, indent=4)}\nResponse: {json.dumps(dat
                                         
                             except Exception as e:
                                 logging.error(f"Error in start: {traceback.format_exc()}")
+                                conn.send(f"FAILED".encode('UTF-8'))
                                 safe_insert(f"❌ Error: {str(e)}", "red")
                                 cadena = ""
 
@@ -910,185 +930,269 @@ JSON: \n{json.dumps(interlocking_json_api, indent=4)}\nResponse: {json.dumps(dat
                     case "end_process":
                         for item in option:
                             cadena += str(item) + ","
-                        part_name = entry_piece.get()
+                        part_name = option[4]
                                         
                         if len(option) == 6 and option[-1] == '1/':
-                            duration = conexion.duration(cadena,option[4])
+                            # ========== 1. INVOKE API CONDUIT (usando SERIAL_PADRE_GLOBAL) ==========
+                            safe_insert("\n🔗 Calling CONDUIT API...", "blue")
+                            logging.info(f"Calling CONDUIT API for parent: {SERIAL_PADRE_GLOBAL}")
 
-                            if duration == "PASSED":
-                                #VALIDACIÓN DE EXPIRACIÓN Y API CONDUIT
-                                try:
-                                    task_duration_actual = float(option[4])
-                                except ValueError:
-                                    task_duration_actual = 0.0
-
-                                records_exp = conexion.get_expiration_time()
-                                expiration_allowed = float(records_exp[0][2]) if records_exp else 9999.0
-
-                                if expiration_allowed >= task_duration_actual:
-                                    url_conduit = conexion.obtener_url_api(4)
-                                    res_conduit = conduit_json.ejecutar(part_name, url_conduit)
-                                    res_conduit = "NO-OP" 
+                            try:
+                                # Obtener URL del API Conduit
+                                url_data = conexion.obtener_url_api()
+                                url_conduit = url_data[3][0] if len(url_data) > 3 else None
+                                
+                                if url_conduit and SERIAL_PADRE_GLOBAL:
+                                    # Crear JSON para CONDUIT usando el serial del padre (global)
+                                    conduit_json_data = conduit_json.conduit_st20(SERIAL_PADRE_GLOBAL)
+                                    logging.info(f"CONDUIT JSON for parent {SERIAL_PADRE_GLOBAL}: {json.dumps(conduit_json_data, indent=2)}")
                                     
-                                    if res_conduit == "ok":
+                                    # Llamar a CONDUIT API
+                                    response_conduit = requests.post(url_conduit, json=conduit_json_data, timeout=30)
+                                    
+                                    if response_conduit.status_code == 200:
+                                        conduit_response = response_conduit.json()
+                                        logging.info(f"CONDUIT Response: {json.dumps(conduit_response, indent=2)}")
+                                        
+                                        # Evaluar respuesta de CONDUIT
+                                        conduit_result = "NO-OP"  # Valor por defecto
+                                        
                                         try:
-                                            conn.send("FAILED".encode('UTF-8'))
+                                            transactions = conduit_response.get("transactions", [])
+                                            if transactions:
+                                                transaction_responses = transactions[0].get("transaction_responses", [])
+                                                if transaction_responses:
+                                                    command_responses = transaction_responses[0].get("command_responses", [])
+                                                    if command_responses:
+                                                        for cmd in command_responses:
+                                                            if cmd.get("command") == "RejectIfTimeExpired":
+                                                                conduit_result = cmd.get("result", "NO-OP")
+                                                                break
                                         except Exception as e:
-                                            safe_insert(f"Error enviando: {e}", "red")
-                                        safe_insert("Conduit API Blocked: Expiración detectada.", "red")
-                                        cadena = ""
-                                        continue 
-                                    elif res_conduit == "NO-OP":
-                                        pass 
+                                            logging.error(f"Error parsing CONDUIT response: {e}")
+                                            conduit_result = "NO-OP"
+                                        
+                                        safe_insert(f"📡 CONDUIT Result for parent {SERIAL_PADRE_GLOBAL}: {conduit_result}", "blue" if conduit_result == "NO-OP" else "orange")
+                                        
+                                        # Si CONDUIT dice "OK", rechazar el proceso
+                                        if conduit_result == "OK":
+                                            safe_insert(f"❌ CONDUIT: Expiration detected for parent {SERIAL_PADRE_GLOBAL} - Process REJECTED", "red")
+                                            logging.warning(f"CONDUIT rejected parent {SERIAL_PADRE_GLOBAL} - Expiration time exceeded")
+                                            
+                                            try:
+                                                conn.send("FAILED".encode('UTF-8'))
+                                            except Exception as e:
+                                                safe_insert(f"Error enviando: {e}", "red")
+                                            
+                                            conexionBitacora.event("CONDUIT-002", f"|CONDUIT Rejected| Parent: {SERIAL_PADRE_GLOBAL}", month, day)
+                                            conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
+                                            
+                                            green_label.configure(image=image_green)
+                                            red_label.configure(image=image_red_full)
+                                            cadena = ""
+                                            continue  # Salir sin continuar
+                                        
+                                        elif conduit_result == "NO-OP":
+                                            safe_insert(f"✅ CONDUIT: No expiration - Continuing...", "green")
+                                            conexionBitacora.event("CONDUIT-001", f"|CONDUIT Approved| Parent: {SERIAL_PADRE_GLOBAL}", month, day)
+                                            conduit_passed = True
+                                        else:
+                                            safe_insert(f"⚠️ CONDUIT: Unexpected result '{conduit_result}' - Continuing", "orange")
+                                            conduit_passed = True
+                                    else:
+                                        safe_insert(f"⚠️ CONDUIT API error: Status {response_conduit.status_code} - Continuing", "orange")
+                                        conduit_passed = True
+                                else:
+                                    safe_insert(f"⚠️ CONDUIT validation skipped - Missing configuration", "orange")
+                                    conduit_passed = True
+                                    
+                            except Exception as e:
+                                safe_insert(f"⚠️ CONDUIT API Error: {str(e)} - Continuing", "orange")
+                                logging.error(f"CONDUIT API exception: {e}")
+                                conduit_passed = True
+
+                            # ========== 2. SOLO SI CONDUIT PERMITIÓ CONTINUAR ==========
+                            if conduit_passed:
+                                
+                                # ========== 3. EJECUTAR DURATION ==========
+                                duration = conexion.duration(cadena, option[4])
+                                
+                                if duration == "PASSED":
+                                    
+                                    # ========== 4. LLAMAR A TRACEABILITY API ==========
+                                    safe_insert(f"\n🔗 Calling TRACEABILITY API...", "blue")
+                                    
+                                    try:
+                                        url_traceability = url_data[4][0] if len(url_data) > 4 else None
+                                        
+                                        if url_traceability and SERIAL_PADRE_GLOBAL:
+                                            # Obtener datos necesarios para traceability
+                                            heater_serial_number = entry_piece.get() if entry_piece.get() else "UNKNOWN"
+                                            plc_value = option[3] if len(option) > 3 else "0"
+                                            plc_defect_code = option[4] if len(option) > 4 else "0"
+                                            
+                                            # Crear JSON para Traceability
+                                            traceability_json_data = traceability_json.traceability_station_20(
+                                                option[4],
+                                                SERIAL_PADRE_GLOBAL,      # parent_serial_number
+                                                PART_NUMBER_GLOBAL,        # parent_part_number
+                                                heater_serial_number,      # heater_serial_number
+                                                plc_value,                 # plc_value
+                                                plc_defect_code            # plc_defect_code
+                                            )
+                                            
+                                            logging.info(f"TRACEABILITY JSON: {json.dumps(traceability_json_data, indent=2)}")
+                                            safe_insert(f"📡 Sending Traceability data for parent: {SERIAL_PADRE_GLOBAL}", "blue")
+                                            
+                                            response_traceability = requests.post(url_traceability, json=traceability_json_data, timeout=30)
+                                            
+                                            if response_traceability.status_code == 200:
+                                                traceability_response = response_traceability.json()
+                                                logging.info(f"TRACEABILITY Response: {json.dumps(traceability_response, indent=2)}")
+                                                safe_insert(f"CONDUIT JSON for parent {SERIAL_PADRE_GLOBAL}: {json.dumps(conduit_json_data, indent=2)}\nCONDUIT Response: {json.dumps(conduit_response, indent=2)}\n📡 Sending Traceability data for parent: {SERIAL_PADRE_GLOBAL}\nTRACEABILITY Response: {json.dumps(traceability_response, indent=2)}\n✅ Traceability API successful", "green")
+                                                
+                                                if traceability_response.get("success", False):
+                                                    conexionBitacora.event("TRACE-001", f"|Traceability Success| Parent: {SERIAL_PADRE_GLOBAL}", month, day)
+                                                else:
+                                                    error_msg = traceability_response.get("message", "Unknown error")
+                                                    safe_insert(f"⚠️ Traceability API returned: {error_msg}", "orange")
+                                                    conexionBitacora.event("TRACE-002", f"|Traceability Warning| {error_msg}", month, day)
+                                            else:
+                                                safe_insert(f"⚠️ Traceability API error: Status {response_traceability.status_code}", "orange")
+                                                logging.error(f"Traceability API failed with status {response_traceability.status_code}")
+                                                conexionBitacora.event("TRACE-003", f"|Traceability Error| Status: {response_traceability.status_code}", month, day)
+                                        else:
+                                            if not url_traceability:
+                                                safe_insert(f"⚠️ Traceability URL not configured - Skipping", "orange")
+                                            if not SERIAL_PADRE_GLOBAL:
+                                                safe_insert(f"⚠️ Parent serial not available - Skipping Traceability", "orange")
+                                                
+                                    except requests.exceptions.Timeout:
+                                        safe_insert(f"⚠️ Traceability API Timeout", "orange")
+                                        logging.error("Traceability API timeout")
+                                    except Exception as e:
+                                        safe_insert(f"⚠️ Traceability API Error: {str(e)}", "orange")
+                                        logging.error(f"Traceability API exception: {e}")
+                                    
+                                    # ========== 5. GENERAR ARCHIVOS ==========
+                                    safe_insert("Command received-> " + cadena + "\n" + "Command END PROCESS PASSED" + "\n"+f"CONDUIT JSON for parent {SERIAL_PADRE_GLOBAL}: {json.dumps(conduit_json_data, indent=2)}\nCONDUIT Response: {json.dumps(conduit_response, indent=2)}\n📡 Sending Traceability data for parent: {SERIAL_PADRE_GLOBAL}\nTRACEABILITY JSON: {json.dumps(traceability_json_data, indent=2)}\nTRACEABILITY Response: {json.dumps(traceability_response, indent=2)}\n✅ Traceability API successful","green")
+                                    try:
+                                        conn.send("PASSED".encode('UTF-8'))
+                                    except Exception as e:
+                                        safe_insert(f"Error enviando: {e}", "red")
+
+                                    # Obtener formatos habilitados
+                                    enabled_formats = conexion.get_enabled_export_formats()
+                                    
+                                    any_file_created = False
+                                    errors = []
+
+                                    # Generar archivos según formatos habilitados
+                                    if 'JSON' in enabled_formats:
+                                        print("Generating JSON file...")
+                                        try:
+                                            file_json = data_json.json_file(option[4])
+                                            if file_json == "PASSED":
+                                                any_file_created = True
+                                            else:
+                                                errors.append(f"JSON: {file_json}")
+                                                safe_insert(f"✗ JSON Error: {file_json}\n", "red")
+                                        except Exception as e:
+                                            errors.append(f"JSON: {str(e)}")
+                                            safe_insert(f"✗ JSON Exception: {str(e)}\n", "red")
+                                        
+                                    if 'CSV' in enabled_formats:
+                                        try:
+                                            import data_csv_60
+                                            file_csv = data_csv_60.csv_file()
+                                            if file_csv == "PASSED":
+                                                any_file_created = True
+                                            else:
+                                                errors.append(f"CSV: {file_csv}")
+                                                safe_insert(f"✗ CSV Error: {file_csv}\n", "red")
+                                        except ImportError:
+                                            errors.append("CSV: Módulo no encontrado")
+                                            safe_insert("✗ CSV module not available\n", "red")
+                                        except Exception as e:
+                                            errors.append(f"CSV: {str(e)}")
+                                            safe_insert(f"✗ CSV Exception: {str(e)}\n", "red")
+                                        
+                                    if 'XML' in enabled_formats:
+                                        try:
+                                            import data_xml
+                                            file_xml = data_xml.xml_file()
+                                            if file_xml == "PASSED":
+                                                any_file_created = True
+                                            else:
+                                                errors.append(f"XML: {file_xml}")
+                                                safe_insert(f"✗ XML Error: {file_xml}\n", "red")
+                                        except ImportError:
+                                            errors.append("XML: Módulo no encontrado")
+                                            safe_insert("✗ XML module not available\n", "red")
+                                        except Exception as e:
+                                            errors.append(f"XML: {str(e)}")
+                                            safe_insert(f"✗ XML Exception: {str(e)}\n", "red")
+                                        
+                                    # Verificar resultados
+                                    if not enabled_formats:
+                                        safe_insert("⚠ No export formats enabled\n", "orange")
+                                        conexionBitacora.event("ENDP-003", "|No export formats enabled|", month, day)
+                                        conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
+                                        green_label.configure(image=image_green_full)
+                                        red_label.configure(image=image_red)
+                                        
+                                    elif errors:
+                                        error_message = "; ".join(errors)
+                                        safe_insert(f"⚠ Some files were not generated: {error_message}\n", "orange")
+                                        
+                                        if any_file_created:
+                                            safe_insert("✓ At least one file was successfully generated\n")
+                                            conexionBitacora.event("ENDP-004", f"|Partial export| {error_message}", month, day)
+                                            conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
+                                            green_label.configure(image=image_green_full)
+                                            red_label.configure(image=image_red)
+                                        else:
+                                            safe_insert("✗ No file could be generated\n", "red")
+                                            try:
+                                                conn.send("FAILED".encode('UTF-8'))
+                                            except Exception as e:
+                                                safe_insert(f"Error enviando: {e}", "red")
+                                            
+                                            conexionBitacora.event("ENDP-002", f"|No files created| {error_message}", month, day)
+                                            conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
+                                            green_label.configure(image=image_green)
+                                            red_label.configure(image=image_red_full)
+                                    else:
+                                        conexionBitacora.event("ENDP-001", "|Command received| " + cadena, month, day)
+                                        conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
+                                        green_label.configure(image=image_green_full)
+                                        red_label.configure(image=image_red)
+                                        
                                 else:
                                     try:
                                         conn.send("FAILED".encode('UTF-8'))
                                     except Exception as e:
                                         safe_insert(f"Error enviando: {e}", "red")
-                                    safe_insert("Cycle Time Excedido: Expiración activa.", "red")
-                                    cadena = ""
-                                    continue
-
-                                # entry_piece.configure(state="readonly", textvariable=piece_name)
-                                # piece_name.set("")
-                                safe_insert("Command received-> "+cadena+"\n"+"Command END PROCESS PASSED"+"\n")
-                                try:
-                                    conn.send("PASSED".encode('UTF-8'))
-                                except Exception as e:
-                                    safe_insert(f"Error enviando: {e}", "red")
-
-
-                                # Obtener formatos habilitados
-                                enabled_formats = conexion.get_enabled_export_formats()
-                                # safe_insert(f"Supported formats: {', '.join(enabled_formats) if enabled_formats else 'None'}\n")
-
-                                # Variables para resultados
-                                json_result = None
-                                csv_result = None
-                                xml_result = None
-                                any_file_created = False
-                                errors = []
-
-                                # Generar archivos según formatos habilitados
-                                if 'JSON' in enabled_formats:
-                                    print("Generating JSON file...")
-                                    try:
-                                        file_json = data_json.json_file(option[4])
-                                        json_result = file_json
-                                        if file_json == "PASSED":
-                                            any_file_created = True
-                                            # safe_insert("✓ JSON file successfully generated\n")
-                                        else:
-                                            errors.append(f"JSON: {file_json}")
-                                            safe_insert(f"✗ JSON Error: {file_json}\n", "red")
-                                    except Exception as e:
-                                        errors.append(f"JSON: {str(e)}")
-                                        print(errors)
-                                        safe_insert(f"✗ JSON Exception: {str(e)}\n", "red")
-                                    
-                                if 'CSV' in enabled_formats:
-                                    try:
-                                        # Importar aquí para evitar dependencia si no está habilitado
-                                        import data_csv_60
-                                        file_csv = data_csv_60.csv_file()
-                                        csv_result = file_csv
-                                        if file_csv == "PASSED":
-                                            any_file_created = True
-                                            # safe_insert("✓ CSV file successfully generated\n")
-                                        else:
-                                            errors.append(f"CSV: {file_csv}")
-                                            safe_insert(f"✗ CSV Error: {file_csv}\n", "red")
-                                    except ImportError:
-                                        errors.append("CSV: Módulo no encontrado")
-                                        safe_insert("✗ CSV module not available\n", "red")
-                                    except Exception as e:
-                                        errors.append(f"CSV: {str(e)}")
-                                        safe_insert(f"✗ CSV Exception: {str(e)}\n", "red")
-                                    
-                                if 'XML' in enabled_formats:
-                                    try:
-                                        # Importar aquí para evitar dependencia si no está habilitado
-                                        import data_xml
-                                        file_xml = data_xml.xml_file()
-                                        xml_result = file_xml
-                                        if file_xml == "PASSED":
-                                            any_file_created = True
-                                            # safe_insert("✓ XML file successfully generated\n")
-                                        else:
-                                            errors.append(f"XML: {file_xml}")
-                                            safe_insert(f"✗ XML Error: {file_xml}\n", "red")
-                                    except ImportError:
-                                        errors.append("XML: Módulo no encontrado")
-                                        safe_insert("✗ XML module not available\n", "red")
-                                    except Exception as e:
-                                        errors.append(f"XML: {str(e)}")
-                                        safe_insert(f"✗ XML Exception: {str(e)}\n", "red")
-                                    
-                                # Verificar resultados
-                                if not enabled_formats:
-                                    safe_insert("⚠ No export formats enabled\n", "orange")
-                                    conexionBitacora.event("ENDP-003", "|No export formats enabled|", month, day)
-                                    conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
-                                    green_label.configure(image=image_green_full)
-                                    red_label.configure(image=image_red)
-                                    
-                                elif errors:
-                                    # Hubo errores en algunos formatos
-                                    error_message = "; ".join(errors)
-                                    safe_insert(f"⚠ Some files were not generated: {error_message}\n", "orange")
-                                    
-                                    if any_file_created:
-                                        # Al menos un archivo se creó exitosamente
-                                        safe_insert("✓ At least one file was successfully generated\n")
-                                        conexionBitacora.event("ENDP-004", f"|Partial export| {error_message}", month, day)
-                                        conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
-                                        green_label.configure(image=image_green_full)
-                                        red_label.configure(image=image_red)
-                                    else:
-                                        # Ningún archivo se creó
-                                        safe_insert("✗ No file could be generated\n", "red")
-                                        try:
-                                            conn.send("FAILED".encode('UTF-8'))
-                                        except Exception as e:
-                                            safe_insert(f"Error enviando: {e}", "red")
-                                        
-                                        conexionBitacora.event("ENDP-002", f"|No files created| {error_message}", month, day)
-                                        conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
-                                        green_label.configure(image=image_green)
-                                        red_label.configure(image=image_red_full)
-                                
-                                else:
-                                    # Todos los formatos habilitados se generaron exitosamente
-                                    # safe_insert("✓ All files were successfully generated\n")
-                                    conexionBitacora.event("ENDP-001", "|Command received| " + cadena, month, day)
-                                    conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
-                                    green_label.configure(image=image_green_full)
-                                    red_label.configure(image=image_red)
-                                        
+                                    safe_insert("Command received-> " + cadena + "\n" + "Command FAILED\n", "red")
+                                    conexionBitacora.event("ENDP-002", "|Command received| " + cadena, month, day)
+                                    conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
+                                    green_label.configure(image=image_green)
+                                    red_label.configure(image=image_red_full)
                             else:
-                                try:
-                                    conn.send("FAILED".encode('UTF-8'))
-                                except Exception as e:
-                                    safe_insert(f"Error enviando: {e}", "red")
-                                safe_insert("Command received-> "+cadena+"\n"+"Command FAILED"+"\n","red")
-                                conexionBitacora.event("ENDP-002","|Command received| "+cadena,month,day)
-                                conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
-
-                                green_label.configure(image=image_green)
-                                red_label.configure(image=image_red_full)
+                                # CONDUIT no permitió continuar (ya se envió FAILED)
+                                pass
+                                
                         else:
                             try:
                                 conn.send("FAILED".encode('UTF-8'))
                             except Exception as e:
                                 safe_insert(f"Error enviando: {e}", "red")
-                            safe_insert("Command received-> "+cadena+"\n"+"Command FAILED"+"\n","red")
-
-                            conexionBitacora.event("ENDP-002","|Command received| "+cadena,month,day)
-                            conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
-
+                            safe_insert("Command received-> " + cadena + "\n" + "Command FAILED\n", "red")
+                            conexionBitacora.event("ENDP-002", "|Command received| " + cadena, month, day)
+                            conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
                             green_label.configure(image=image_green)
                             red_label.configure(image=image_red_full)
-                                    
+                                        
                         cadena = ""
                         pieza = ""
                             
@@ -1182,20 +1286,6 @@ JSON: \n{json.dumps(interlocking_json_api, indent=4)}\nResponse: {json.dumps(dat
                             cadena += str(item) + ","
                         # print(cadena)
                         if option[-1] == '1/':
-                            pieza_padre = entry_piece.get()
-                            
-                            #VERIFICACIÓN COMPONENTES ANTES DEL COMMIT
-                            qty_ok = conexion.verificar_cantidad_componentes(pieza_padre)
-                            if not qty_ok:
-                                try:
-                                    conn.send("FAILED".encode('UTF-8'))
-                                except Exception as e:
-                                    safe_insert(f"Error enviando: {e}", "red")
-                                safe_insert("Commit bloqueado: Componentes incompletos.", "red")
-                                logging.warning("Commit bloqueado de último momento: componentes insuficientes.")
-                                cadena = ""
-                                continue
-                            
                             if len(entry_piece.get()) == 0:
                                 safe_insert("Command received-> "+cadena+"\n"+": The part has not been loaded"+"\n"+"Command FAILED"+"\n", "red")
                                 try:
@@ -1211,7 +1301,7 @@ JSON: \n{json.dumps(interlocking_json_api, indent=4)}\nResponse: {json.dumps(dat
                             else:
                                 part_name = entry_piece.get()
                                 commit_options, table_data = commands.commit(cadena, part_name)
-                        
+                                print(f"Commit options: {commit_options}")
                                 if(commit_options == 'PASSED'):
                                     if table_data:
                                         update_table_with_data(table_data)
@@ -1494,6 +1584,9 @@ def application():
     if(host == server[0][1] and str(port) == str(server[0][0])):
         # Bind el evento de cierre de ventana a close_app
         root.protocol("WM_DELETE_WINDOW", safe_exit)
+
+        # Iniciar keep-alive de BD
+        keep_alive_database()
 
         threading.Thread(target=accept_connections, daemon=True).start()
 
