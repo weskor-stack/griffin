@@ -91,20 +91,24 @@ def interlocking_station_50_80(parent_serial_number, parent_part_number, compone
     process_name = configurador[1]
     operator = configurador[2]
     station = configurador[3]
+    model_id = configurador[8]
 
     programas = conexion.select_programs()
 
-    # Orden correcto según PDF ST50/ST80 Sec 5.1: station_id → model_id → component_partnumber
     unit_information.append({
         "name": "station_id",
         "value": machine_id
     })
+    unit_information.append({
+        "name": "model_id",
+        "value": model_id
+    })
 
-    for x in programas:
-        unit_information.append({
-            "name": "model_id",
-            "value": x[2]
-        })
+    # for x in programas:
+    #     unit_information.append({
+    #         "name": "model_id",
+    #         "value": x[2]
+    #     })
 
     unit_information.append({
         "name": "component_partnumber",
