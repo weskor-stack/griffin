@@ -1,7 +1,7 @@
 import json
-from logging import config
 import conexion
 import rfc3339
+from datetime import datetime, timezone
 
 def evaluar_codigo_defecto(val_plc, low_lim, high_lim, plc_defect_code, test_name, atributos_db):
     if low_lim in (None, "") or high_lim in (None, ""):
@@ -23,8 +23,7 @@ def evaluar_codigo_defecto(val_plc, low_lim, high_lim, plc_defect_code, test_nam
         
     return plc_defect_code
 
-def traceability_station_20(serial_number,parent_serial_number, parent_part_number, heater_serial_number, plc_value, plc_defect_code):
-    
+def interlocking_station_20(serial_number, parent_serial_number, parent_part_number, heater_serial_number, plc_value, plc_defect_code):
     config = conexion.configurador()
     if not config or config == "FAILED":
         return "Error: No se encontró configuración."
@@ -57,44 +56,42 @@ def traceability_station_20(serial_number,parent_serial_number, parent_part_numb
     atributos_db = conexion.atributos()
     test_steps_array = []
 
-    def agregar_steps(data_list, name_idx, desc_idx, low_idx, high_idx, unit_idx, status_idx, val_source, defect_code_idx):
+    def agregar_steps(data_list, name_idx, desc_idx, low_idx, high_idx, unit_idx, status_idx, val_source):
         for x in data_list:
             low = x[low_idx] if low_idx is not None else ""
             high = x[high_idx] if high_idx is not None else ""
-            val = x[val_source] if val_source is not None else ""
+            val = x[val_source] if isinstance(val_source, int) else val_source
             test_name = x[name_idx]
             
-            defect_code_value = x[defect_code_idx] if defect_code_idx is not None else ""
-            
-            # codigo_defecto = evaluar_codigo_defecto(val, low, high, plc_defect_code, test_name, atributos_db)
+            codigo_defecto = evaluar_codigo_defecto(val, low, high, plc_defect_code, test_name, atributos_db)
 
             test_steps_array.append({
                 "name": test_name,                                           
-                "description": x[desc_idx] if desc_idx is not None else test_name, 
+                "description": test_name, 
                 "comparator": "GELE",
                 "lowLimit": low,
                 "highLimit": high,
                 "units": x[unit_idx] if unit_idx is not None else "",
                 "status": x[status_idx] if status_idx is not None else "PASSED",
                 "value": val,
-                "defect_code": defect_code_value
+                "defect_code": codigo_defecto
             })
 
     if type_station == 1 or type_station == 4: 
-        agregar_steps(conexion.screwing_data(part_id), 11, 11, 2, 3, 5, 6, 1, 9)
+        agregar_steps(conexion.screwing_data(part_id), 11, 11, 2, 3, 5, 6, plc_value)
         
     if type_station == 2 or type_station == 4: 
-        agregar_steps(conexion.pressfit_data(part_id), 11, 11, 2, 3, 5, 6, 1, 9)
+        agregar_steps(conexion.pressfit_data(part_id), 11, 11, 2, 3, 5, 6, plc_value)
         
     if type_station == 3 or type_station == 4: 
-        agregar_steps(conexion.inspection_data3(part_id), 11, 11, 2, 3, 5, 6, 1, 9)
+        agregar_steps(conexion.inspection_data(part_id), 11, 11, 2, 3, 5, 6, plc_value)
         
     if type_station == 4: 
-        agregar_steps(conexion.electrical_data(part_id), 11, 11, 2, 3, 5, 6, 1, 9)
-        agregar_steps(conexion.continuity_data(part_id), 0, 0, 3, 4, 5, 6, 7, 8)
-        agregar_steps(conexion.leaktest_data(part_id), 0, 0, None, None, 4, 3, 2, 5)
-        agregar_steps(conexion.welding_data(part_id), 0, 0, None, None, 6, 5, 2, 7)
-        agregar_steps(conexion.temperature_data(part_id), 0, 0, 9, 10, 5, None, 4, 8)
+        agregar_steps(conexion.electrical_data(part_id), 11, 11, 2, 3, 5, 6, plc_value)
+        agregar_steps(conexion.continuity_data(part_id), 0, 0, 3, 4, 5, 6, 7)
+        agregar_steps(conexion.leaktest_data(part_id), 0, 0, None, None, 4, 3, 2)
+        agregar_steps(conexion.welding_data(part_id), 0, 0, None, None, 6, 5, 2)
+        agregar_steps(conexion.temperature_data(part_id), 0, 0, 9, 10, 5, None, 4)
 
     estructura_json = {
         "serial": parent_serial_number,
@@ -111,46 +108,150 @@ def traceability_station_20(serial_number,parent_serial_number, parent_part_numb
         "commands": []
     }
 
-    if program_name and str(program_name).strip() != "":
-        estructura_json["commands"].append({
-            "command": "ReplaceNontrackedComponent",
-            "ref_designator": str(process_name)+"_Program_Name_Version",
-            "component_id": program_name
-        })
-
     estructura_json["commands"].append({
         "command": "ReplaceNontrackedComponent",
-        "ref_designator": f"{process_name}__Machine_ID",
+        "ref_designator": f"{process_name}_Station ID",
         "component_id": machine_id
     })
 
-    prog_id = str(prog_id).strip() if prog_id else "default_program"
+    program_id = str(program_name).strip() if program_name else "default_program"
     estructura_json["commands"].append({
         "command": "ReplaceNontrackedComponent",
         "ref_designator": f"{process_name}_Program ID",
-        "component_id": prog_id
+        "component_id": program_id
     })
 
     estructura_json["commands"].append({
         "command": "ReplaceTrackedComponent",
-        "ref_designator": f"{process_name}_heater_serial_number",
-        "workstation": "COMP",
+        "ref_designator": f"{process_name}_component",
         "component_id": heater_serial_number
     })
 
     return estructura_json
 
+def traceability_station_50_80(task_duration, serial_padre, part_number_padre, component_serial, component_part_number, defect_code_default):
+    config_local = conexion.configuradorst50_80()
+    
+    if config_local and config_local != "FAILED" and len(config_local) >= 6:
+        machine_id = str(config_local[0]).strip()
+        operator_id = str(config_local[1]).strip()
+        process_name = str(config_local[3]).strip()
+        component_name_db = str(config_local[4]).strip()
+        program_version = str(config_local[5]).strip()
+    else:
+        machine_id = "AMC-GENLD97"
+        operator_id = "9999"
+        process_name = "Pressfit"
+        component_name_db = "component"
+        program_version = "default_program"
+
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    part_row = conexion.pieces(serial_padre)
+    all_test_rows = []
+    
+    if part_row:
+        part_id = part_row[0]
+        
+        try:
+            sr = conexion.screwing_data(part_id)
+            if sr and isinstance(sr, list): all_test_rows.extend(sr)
+        except Exception: pass
+        
+        try:
+            pr = conexion.pressfit_data(part_id)
+            if pr and isinstance(pr, list): all_test_rows.extend(pr)
+        except Exception: pass
+        
+        try:
+            ir = conexion.inspection_data(part_id)
+            if ir and isinstance(ir, list): all_test_rows.extend(ir)
+        except Exception: pass
+        
+        try:
+            er = conexion.electrical_data(part_id)
+            if er and isinstance(er, list): all_test_rows.extend(er)
+        except Exception: pass
+
+    steps_list = []
+    global_status = "PASSED"
+
+    for row in all_test_rows:
+        try:
+            val_medido = str(row[1]) if row[1] is not None else "0.0"
+            lim_inf = float(row[2]) if row[2] is not None else 0.0
+            lim_sup = float(row[3]) if row[3] is not None else 0.0
+            unidad = str(row[5]) if row[5] is not None else ""
+            status_step = str(row[6]).upper() if row[6] is not None else "PASSED"
+            name_step = str(row[11]) if row[11] is not None else "Measurement"
+            desc_step = str(row[10]) if row[10] is not None else "Description"
+        except Exception:
+            continue
+
+        if status_step == "FAILED":
+            global_status = "FAILED"
+            step_defect = defect_code_default if defect_code_default else "PLC_DEFAULT_001"
+        else:
+            step_defect = "NONE"
+
+        steps_list.append({
+            "name": name_step,
+            "description": desc_step,
+            "comparator": "GELE",
+            "lowLimit": lim_inf,
+            "highLimit": lim_sup,
+            "units": unidad,
+            "status": status_step,
+            "value": val_medido,
+            "defect_code": step_defect
+        })
+
+    program_version = str(program_version).strip() if program_version else "default_program"
+
+    payload = {
+        "serial": serial_padre,
+        "product": part_number_padre,
+        "station": machine_id,
+        "operator": operator_id,
+        "start_time": now_utc,
+        "end_time": now_utc,
+        "process_name": process_name,
+        "status": global_status,
+        "test_steps": {
+            "STEPS LIST": steps_list
+        },
+        "commands": [
+            {
+                "command": "ReplaceNontrackedComponent",
+                "ref_designator": f"{process_name}_Station ID",
+                "component_id": machine_id
+            },
+            {
+                "command": "ReplaceNontrackedComponent",
+                "ref_designator": f"{process_name}_Program ID",
+                "component_id": program_version   
+            },
+            {
+                "command": "ReplaceTrackedComponent",
+                "ref_designator": f"{process_name}_{component_name_db}",
+                "component_id": component_part_number
+            }
+        ]
+    }
+
+    return payload
+
 # if __name__ == "__main__":
-#     resultado_json = traceability_station_20(
-#         serial_number="P1517040-01-G:REV01:SANN26097000001",
-#         parent_serial_number="P1135558-04-A:SANN26097000001",
-#         parent_part_number="LFTM1135558-04-A",           
-#         heater_serial_number="P2034365-C0-B:SFY0000TEST001", 
+#     resultado_json = traceability_station_50_80(
+#         serial_number = "P2173404-00-C:SEYU26061A0765",
+#         parent_serial_number="P1106394-71-P:SE4A25079000001",
+#         parent_part_number="1231284792783",           
+#         heater_serial_number="P2170207-00-E:SE4A26127000245", 
 #         plc_value="2.33",                                      
 #         plc_defect_code="PLC_DEFAULT_001"
 #     )
     
-    if isinstance(resultado_json, dict):
-        print(json.dumps(resultado_json, indent=4))
-    else:
-        print(f"\nError:\n{resultado_json}")
+#     if isinstance(resultado_json, dict):
+#         print(json.dumps(resultado_json, indent=4))
+#     else:
+#         print(f"\nError:\n{resultado_json}")
