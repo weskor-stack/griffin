@@ -88,6 +88,25 @@ def configurar_logging():
     
     return logger
 
+def keep_alive_database():
+    """Mantiene viva la conexión a la base de datos"""
+    try:
+        # Ejecutar una consulta simple cada 5 minutos
+        with conexion.conn.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        logging.debug("Keep-alive ejecutado")
+    except Exception as e:
+        logging.warning(f"Keep-alive falló: {e}")
+        # Intentar reconectar
+        try:
+            conexion.db_manager._connect()
+        except:
+            pass
+    
+    # Programar próximo keep-alive (5 minutos)
+    root.after(300000, keep_alive_database)
+
 logger = configurar_logging()
 
 
@@ -1332,6 +1351,9 @@ def application():
     if(host == server[0][1] and str(port) == str(server[0][0])):
         # Bind el evento de cierre de ventana a close_app
         root.protocol("WM_DELETE_WINDOW", safe_exit)
+
+        # Iniciar keep-alive de BD
+        keep_alive_database()
 
         threading.Thread(target=accept_connections, daemon=True).start()
 
