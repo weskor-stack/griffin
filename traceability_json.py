@@ -23,7 +23,8 @@ def evaluar_codigo_defecto(val_plc, low_lim, high_lim, plc_defect_code, test_nam
         
     return plc_defect_code
 
-def interlocking_station_20(serial_number, parent_serial_number, parent_part_number, heater_serial_number, plc_value, plc_defect_code):
+def traceability_station_20(serial_number,parent_serial_number, parent_part_number, heater_serial_number, plc_value, plc_defect_code):
+    
     config = conexion.configurador()
     if not config or config == "FAILED":
         return "Error: No se encontró configuración."
@@ -56,74 +57,79 @@ def interlocking_station_20(serial_number, parent_serial_number, parent_part_num
     atributos_db = conexion.atributos()
     test_steps_array = []
 
-    def agregar_steps(data_list, name_idx, desc_idx, low_idx, high_idx, unit_idx, status_idx, val_source):
+    def agregar_steps(data_list, name_idx, desc_idx, low_idx, high_idx, unit_idx, status_idx, val_source, defect_code_idx):
         for x in data_list:
             low = x[low_idx] if low_idx is not None else ""
             high = x[high_idx] if high_idx is not None else ""
-            val = x[val_source] if isinstance(val_source, int) else val_source
+            val = x[val_source] if val_source is not None else ""
             test_name = x[name_idx]
             
-            codigo_defecto = evaluar_codigo_defecto(val, low, high, plc_defect_code, test_name, atributos_db)
+            defect_code_value = x[defect_code_idx] if defect_code_idx is not None else ""
+            
+            # codigo_defecto = evaluar_codigo_defecto(val, low, high, plc_defect_code, test_name, atributos_db)
 
             test_steps_array.append({
-                "name": test_name,                                           
-                "description": test_name, 
+                "name": test_name,                           
+                "description": x[desc_idx] if desc_idx is not None else test_name, 
                 "comparator": "GELE",
                 "lowLimit": low,
                 "highLimit": high,
                 "units": x[unit_idx] if unit_idx is not None else "",
                 "status": x[status_idx] if status_idx is not None else "PASSED",
                 "value": val,
-                "defect_code": codigo_defecto
+                "defect_code": defect_code_value
             })
 
     if type_station == 1 or type_station == 4: 
-        agregar_steps(conexion.screwing_data(part_id), 11, 11, 2, 3, 5, 6, plc_value)
+        agregar_steps(conexion.screwing_data(part_id), 11, 11, 2, 3, 5, 6, 1, 9)
         
     if type_station == 2 or type_station == 4: 
-        agregar_steps(conexion.pressfit_data(part_id), 11, 11, 2, 3, 5, 6, plc_value)
+        agregar_steps(conexion.pressfit_data(part_id), 11, 11, 2, 3, 5, 6, 1, 9)
         
     if type_station == 3 or type_station == 4: 
-        agregar_steps(conexion.inspection_data(part_id), 11, 11, 2, 3, 5, 6, plc_value)
+        agregar_steps(conexion.inspection_data3(part_id), 11, 11, 2, 3, 5, 6, 1, 9)
         
     if type_station == 4: 
-        agregar_steps(conexion.electrical_data(part_id), 11, 11, 2, 3, 5, 6, plc_value)
-        agregar_steps(conexion.continuity_data(part_id), 0, 0, 3, 4, 5, 6, 7)
-        agregar_steps(conexion.leaktest_data(part_id), 0, 0, None, None, 4, 3, 2)
-        agregar_steps(conexion.welding_data(part_id), 0, 0, None, None, 6, 5, 2)
-        agregar_steps(conexion.temperature_data(part_id), 0, 0, 9, 10, 5, None, 4)
+        agregar_steps(conexion.electrical_data(part_id), 11, 11, 2, 3, 5, 6, 1, 9)
+        agregar_steps(conexion.continuity_data(part_id), 0, 0, 3, 4, 5, 6, 7, 8)
+        agregar_steps(conexion.leaktest_data(part_id), 0, 0, None, None, 4, 3, 2, 5)
+        agregar_steps(conexion.welding_data(part_id), 0, 0, None, None, 6, 5, 2, 7)
+        agregar_steps(conexion.temperature_data(part_id), 0, 0, 9, 10, 5, None, 4, 8)
 
     estructura_json = {
         "serial": parent_serial_number,
         "product": parent_part_number, 
         "station": machine_id,
         "operator": operator,
+        "password": "",
         "start_time": str(timer) if timer else "",
         "end_time": str(end_time) if end_time else "",
+        "type": "PRODUCTION",
         "process_name": process_name,
         "status": status_general,
+        "commands": [],
         "test_steps": {
-            "STEPS LIST": test_steps_array
-        },
-        "commands": []
+            machine_id: test_steps_array
+        }
     }
 
-    estructura_json["commands"].append({
-        "command": "ReplaceNontrackedComponent",
-        "ref_designator": f"{process_name}_Station ID",
-        "component_id": machine_id
-    })
+    if program_name and str(program_name).strip() != "":
+        estructura_json["commands"].append({
+            "command": "ReplaceNontrackedComponent",
+            "ref_designator": str(process_name)+"_Program_Name_Version",
+            "component_id": program_name
+        })
 
-    program_id = str(program_name).strip() if program_name else "default_program"
     estructura_json["commands"].append({
         "command": "ReplaceNontrackedComponent",
-        "ref_designator": f"{process_name}_Program ID",
-        "component_id": program_id
+        "ref_designator": f"{process_name}__Machine_ID",
+        "component_id": machine_id
     })
 
     estructura_json["commands"].append({
         "command": "ReplaceTrackedComponent",
-        "ref_designator": f"{process_name}_component",
+        "ref_designator": f"{process_name}_heater_serial_number",
+        "workstation": "COMP",
         "component_id": heater_serial_number
     })
 
