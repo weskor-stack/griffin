@@ -37,7 +37,7 @@ def eliminar_todos_archivos_shop_order(directorio=""):
         print(f"\n✓ No se encontraron archivos previos de shop_order para eliminar")
         return 0
 
-def consultar_api_y_guardar(api_url, shop_order,directorio_destino=""):
+def consultar_api_y_guardar(api_url, shop_order,qty,directorio_destino=""):
     """
     Consulta una API, extrae part_number, serial_number y process_name,
     ordena los datos por serial_number de forma ascendente,
@@ -52,7 +52,8 @@ def consultar_api_y_guardar(api_url, shop_order,directorio_destino=""):
     Returns:
         tuple: (success, nombre_archivo, cantidad_registros)
     """
-    url_concatenada = f"{api_url}{shop_order}"
+    url = api_url.replace("shop_order", shop_order).replace("limit=qty", f"limit={qty}")
+    url_concatenada = f"{url}"
     try:
         # 1. Consultar la API
         # print(f"📡 Consultando API: {url_concatenada}")
@@ -348,41 +349,42 @@ def listar_archivos_existentes(directorio=""):
 # ==================== CONFIGURACIÓN PRINCIPAL ====================
 
 # if __name__ == "__main__":
-    # print("=" * 60)
-    # print("🚀 SISTEMA DE EXTRACCIÓN DE DATOS DE API")
-    # print("📊 CON ORDENAMIENTO ASCENDENTE POR SERIAL_NUMBER")
-    # print("🗑️  ELIMINA TODOS LOS SHOP_ORDER ANTERIORES")
-    # print("=" * 60)
-    # print(f"📅 Fecha de ejecución: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    # print("=" * 60)
+#     print("=" * 60)
+#     print("🚀 SISTEMA DE EXTRACCIÓN DE DATOS DE API")
+#     print("📊 CON ORDENAMIENTO ASCENDENTE POR SERIAL_NUMBER")
+#     print("🗑️  ELIMINA TODOS LOS SHOP_ORDER ANTERIORES")
+#     print("=" * 60)
+#     print(f"📅 Fecha de ejecución: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+#     print("=" * 60)
     
-    # Mostrar archivos existentes antes de comenzar
-    # print("\n📋 Archivos existentes ANTES de la ejecución:")
-    # listar_archivos_existentes()
+#     # Mostrar archivos existentes antes de comenzar
+#     print("\n📋 Archivos existentes ANTES de la ejecución:")
+#     listar_archivos_existentes()
     
     
-    # ===== USO CON API REAL =====
-    # print("-" * 40)
+#     # ===== USO CON API REAL =====
+#     print("-" * 40)
     
-    # Ejemplo de uso con API real
-    # URL_API = "http://localhost:8000/custom-api/p2480dc1/units/in-locations/by-pn-so?shortstation=FLPA&shoporderno="
-    # SOP_ORDER = "SO0012"
-    # print(f"📝 URL a consultar: {URL_API}{SOP_ORDER}")
-    # print("\nEjecutando consulta a API real...")
+#     # Ejemplo de uso con API real
+#     URL_API = "http://localhost:8000/custom-api/p2480dc1/units/in-locations/by-pn-so?shortstation=1ASM&shoporderno=shop_order&unitstatus=15&limit=14"
+#     SOP_ORDER = "SPC000"
+#     QTY = 14
+#     print(f"📝 URL a consultar: {URL_API}{SOP_ORDER}")
+#     print("\nEjecutando consulta a API real...")
     
-    # Descomentar la siguiente línea para ejecutar con la API real
-    #exito, nombre, cantidad = consultar_api_y_guardar(URL_API, SOP_ORDER)
+#     # Descomentar la siguiente línea para ejecutar con la API real
+#     exito, nombre, cantidad = consultar_api_y_guardar(URL_API, SOP_ORDER, QTY)
     
-    # if exito:
-    #     print(f"\n✅ Proceso completado exitosamente!")
-    #     print(f"   📄 Archivo generado: {nombre}")
-    #     print(f"   📊 Registros procesados: {cantidad}")
-    #     print("\n📋 Archivos existentes DESPUÉS de la ejecución:")
-    #     # listar_archivos_existentes()
-    # else:
-    #     print(f"\n❌ Error en el proceso de consulta a la API")
-    #     print("   (Esto es normal si el servidor no está ejecutándose)")
+#     if exito:
+#         print(f"\n✅ Proceso completado exitosamente!")
+#         print(f"   📄 Archivo generado: {nombre}")
+#         print(f"   📊 Registros procesados: {cantidad}")
+#         print("\n📋 Archivos existentes DESPUÉS de la ejecución:")
+#         # listar_archivos_existentes()
+#     else:
+#         print(f"\n❌ Error en el proceso de consulta a la API")
+#         print("   (Esto es normal si el servidor no está ejecutándose)")
     
-    # print("\n" + "=" * 60)
-    # print("✅ FIN DEL PROCESO")
-    # print("=" * 60)
+#     print("\n" + "=" * 60)
+#     print("✅ FIN DEL PROCESO")
+#     print("=" * 60)
