@@ -488,6 +488,8 @@ def safe_insert(msg, text_color=None):
 
 
 def worker(conn, addr):
+    # Declaramos el uso de las variables globales para la API de Interlocking
+    global SHOP_ORDER_PART_NUMBER, SHOP_ORDER_SERIAL_NUMBER, UNIT_PART_NUMBER, PARENT_PART_NUMBER, PARENT_SERIAL_NUMBER
     cadena = ""
     pieza = ""
     contador = 0
@@ -561,13 +563,14 @@ def worker(conn, addr):
                             try:
                                 # Obtener URLs
                                 url_data = conexion.obtener_url_api()
+                                url_shop_order = url_data[0][0]      # Shop Order API
                                 url_parentage = url_data[1][0]      # Parentage API
                                 url_api_unit = url_data[2][0]       # Unit API
                                 url_interlocking = url_data[3][0]   # Interlocking API
                                 url_conduit = url_data[4][0]        # Conduit API
 
                                 # ========== ESCANEO 1: SERIAL HEATSINK (PIEZA PADRE) ==========
-                                safe_insert("🔍 SCAN 1/2: Scan Heatsink Serial Number", "green")
+                                safe_insert("🔍 SCAN 1: Scan Heatsink Serial Number", "green")
                                 logging.info("Waiting for heatsink scan")
 
                                 start_time = time.time()
@@ -635,6 +638,25 @@ def worker(conn, addr):
                                             unit_serial_number = data_unit.get("serial_number", "")
                                             
                                             registros_reales = procesar_registros.verificar_archivos()
+                                            
+                                            configurador = conexion.configurador()
+                                            sop_order = configurador[8]
+                                            qty_sp_order = configurador[5]
+                                            if registros_reales == "EMPTY_FILE":
+                                                exito, nombre, cantidad = shopo_order_api.consultar_api_y_guardar(url_shop_order, sop_order, qty_sp_order)
+                                                sop_part_number, sop_serial_number, sop_process_name = leer_shop_order.leer_archivo_generado()
+                                            elif registros_reales == "EMPTY_DATA":
+                                                exito, nombre, cantidad = shopo_order_api.consultar_api_y_guardar(url_shop_order, sop_order, qty_sp_order)
+                                                sop_part_number, sop_serial_number, sop_process_name = leer_shop_order.leer_archivo_generado()
+                                            else:
+                                                sop_part_number, sop_serial_number, sop_process_name = leer_shop_order.leer_archivo_generado()
+                                            
+                                            UNIT_PART_NUMBER = unit_part_number
+                                            UNIT_SERIAL_NUMBER = unit_serial_number
+
+                                            SHOP_ORDER_PART_NUMBER = sop_part_number
+                                            SHOP_ORDER_SERIAL_NUMBER = sop_serial_number
+                                            
                                             
                                             break
                                         
