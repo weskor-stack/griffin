@@ -2450,19 +2450,8 @@ def configurador():
         conn.commit() 
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT machine_id, 
-                process_name, 
-                operator, 
-                station, 
-                program_name_version,
-                qty_components, 
-                client_id, 
-                password, 
-                shop_order,
-                model_id,
-                print_macro, 
-                location, 
-                shop_flor
+            SELECT machine_id, process_name, operator, station, 
+                   program_name_version, qty_components, client_id, password
             FROM configurador 
             LIMIT 1
         """)
@@ -2820,70 +2809,13 @@ def verificar_cantidad_componentes(serial_padre):
         return False
     
 
-#Configurador urls
-def select_api_configs_st50_80():
-
-    try:
-        conn   = get_connection()
-        cursor = conn.cursor()
-        sql = "SELECT url_data_id, tc_id, name, url_data FROM url_data ORDER BY url_data_id ASC"
-        cursor.execute(sql)
-        rows = cursor.fetchall()
-        
-        cursor.close()
-        conn.close()
-        return rows
-    except Exception as e:
-        print(f"Error en select_api_configs_st50_80: {e}")
-        return "FAILED"
-
-def update_api_by_name_st50_80(api_name, nueva_url):
-
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        sql = """
-            UPDATE url_data 
-            SET url_data = ? 
-            WHERE name = ?
-        """
-        cursor.execute(sql, (nueva_url, api_name))
-        conn.commit()
-        
-        cursor.close()
-        conn.close()
-        return True
-    except Exception as e:
-        if conn: conn.rollback()
-        raise Exception(f"Fallo al actualizar URL de la API {api_name}: {e}")
-    
-def insert_api_by_name_st50_80(api_name, url_data):
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        sql = """
-            INSERT INTO url_data (name, url_data)
-            VALUES (?, ?)
-        """
-        cursor.execute(sql, (api_name, url_data))
-        conn.commit()
-        
-        cursor.close()
-        conn.close()
-        return True
-    except Exception as e:
-        if conn: conn.rollback()
-        raise Exception(f"Fallo al registrar la API {api_name}: {e}")
-    
 #CONFIGURADOR ST50-80
 def configuradorst50_80():
     try:
         conn = get_connection() 
         cursor = conn.cursor()  
         sql = """
-            SELECT machine_id, operator, model_id, process_name, shop_order, program_name_version 
+            SELECT machine_id, operator, model_id, process_name, shop_order 
             FROM configurador 
             LIMIT 1
         """
@@ -2943,81 +2875,7 @@ def insert_configuratorst50_80(machine_id, operator, model_id, process_name, sho
     except Exception as e:
         if conn: conn.rollback()
         raise Exception(f"Fallo al insertar configuración inicial: {e}")
-
-# ===================== Configurador items ST40 (Tabla 2.2 - 9 campos) =====================
-def configurador_st40():
-    """Lee los 9 items de configuración de ST40 (Tabla 2.2 del PDF).
-       Retorna: (machine_id, client_id, operator, password,
-                 model_id, process_name, print_macro, location, shop_flor)"""
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        sql = """
-            SELECT machine_id, client_id, operator, password,
-                   model_id, process_name, print_macro, location, shop_flor
-            FROM configurador
-            LIMIT 1
-        """
-        cursor.execute(sql)
-        registro = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        if registro:
-            return registro
-        else:
-            return ("", "", "", "", "", "", "", "", "")
-    except Exception as e:
-        print(f"Error en conexion.configurador_st40: {e}")
-        return "FAILED"
-
-def update_configurador_st40(machine_id, client_id, operator, password,
-                             model_id, process_name, print_macro, location, shop_flor):
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        sql = """
-            UPDATE configurador
-            SET machine_id = ?,
-                client_id = ?,
-                operator = ?,
-                password = ?,
-                model_id = ?,
-                process_name = ?,
-                print_macro = ?,
-                location = ?,
-                shop_flor = ?
-        """
-        cursor.execute(sql, (machine_id, client_id, operator, password,
-                             model_id, process_name, print_macro, location, shop_flor))
-        conn.commit()
-        cursor.close()
-        conn.close()
-        return True
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        raise Exception(f"Fallo en Base de Datos: {e}")
-
-def insert_configurador_st40(machine_id, client_id, operator, password,
-                             model_id, process_name, print_macro, location, shop_flor):
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        sql = """
-            INSERT INTO configurador (machine_id, client_id, operator, password,
-                                      model_id, process_name, print_macro, location, shop_flor)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        cursor.execute(sql, (machine_id, client_id, operator, password,
-                             model_id, process_name, print_macro, location, shop_flor))
-        conn.commit()
-        cursor.close()
-        conn.close()
-        return True
-    except Exception as e:
-        if conn: conn.rollback()
-        raise Exception(f"Fallo al insertar configuración inicial ST40: {e}")
-
+    
   ####Atributos st50-80
 
 def select_attributes_st50_80():
@@ -3141,7 +2999,59 @@ def insert_api_by_name_st50_80(api_name, url_data):
     except Exception as e:
         if conn: conn.rollback()
         raise Exception(f"Fallo al registrar la API {api_name}: {e}")
+    
 
+#CONFIGURADOR SHOP ORDER ST40
+def configurador_shop_order_st40():
+    try:
+        conn.commit() 
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT shop_order, qty_components
+            FROM configurador 
+            LIMIT 1
+        """)
+        datos_config = cursor.fetchone()
+        cursor.close()
+
+        # if not datos_config:
+        #     print("[INFO] La tabla configurador está vacía. Esperando la primera inserción.")
+        #     return "No_data"
+            
+        return datos_config
+    except Exception as e:
+        print(f"[ERROR] Error en función configurador(): {e}")
+        return "FAILED"
+
+def update_configurador_shop_order_st40(shop_order, qty_components, conn):
+    try:
+        with conn.cursor() as cursor:
+            sql_update = """
+                UPDATE configurador 
+                SET `shop_order` = ?,
+                    `qty_components` = ?
+            """
+            cursor.execute(sql_update, (shop_order, qty_components))
+            
+            # Si no se actualizó nada, revisamos si la tabla está vacía para insertar
+            if cursor.rowcount == 0:
+                cursor.execute("SELECT COUNT(*) FROM configurador")
+                if cursor.fetchone()[0] == 0:
+                    sql_insert = """
+                        INSERT INTO configurador (
+                            `shop_order`, `qty_components`
+                        ) VALUES (?, ?)
+                    """
+                    cursor.execute(sql_insert, (shop_order, qty_components))
+            
+            conn.commit()
+            return True
+            
+    except Exception as e:
+        conn.rollback()
+        # Lanzamos el error hacia la interfaz gráfica para que aparezca en pantalla
+        raise Exception(f"Fallo en Base de Datos: {e}")
+    
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
 # parameters_electrical(['Ct', '50', '10', '100', 'Numeric', 'N', 'OK', 'Comentarios'],name)
