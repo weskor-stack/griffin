@@ -47,15 +47,16 @@ class FormularioApiConfig:
         except:
             pass
 
-        # ST20 invoca 5 APIs. Orden segun la Tabla 2.1 "APIS List" del PDF TLA_E34_ST20:
-        #   PARENTAGE (GET) -> UNIT (GET) -> INTERLOCKING (POST) -> TRACEABILITY (POST) -> CONDUIT (POST)
+        # ST20 invoca 5 APIs. Orden segun el flujo de secuencia del PDF TLA_E34_ST20
+        # (correccion solicitada por Edgar: CONDUIT antes de TRACEABILITY):
+        #   Seq 3 PARENTAGE -> Seq 4 UNIT -> Seq 5 INTERLOCKING -> Seq 6 CONDUIT -> Seq 7 TRACEABILITY
         # Los nombres deben coincidir EXACTAMENTE con la columna 'name' de url_data.
         self.APIS_BASE = [
             "PARENTAGE",
             "UNIT",
             "INTERLOCKING",
-            "TRACEABILITY",
             "CONDUIT",
+            "TRACEABILITY",
         ]
 
         self.entries = {}
