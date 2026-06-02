@@ -38,10 +38,18 @@ class ConfiguradorUI:
         self.root = root
         self.root.title("Configuración")
         self.root.geometry("600x300") 
-        self.root.configure(bg=BG_MAIN)
-        self.root.focus_force() 
-        self.root.attributes("-topmost", False) 
+        self.root.configure(bg=BG_MAIN) 
+        self.root.attributes("-topmost", True)  
+        self.root.focus_force()  
         
+        self.root.grab_set() 
+
+        try:
+            ruta_icono = os.path.join(os.path.dirname(os.path.abspath(__file__)), "favicon.ico")
+            self.root.after(200, lambda: self.root.iconbitmap(ruta_icono))
+        except Exception as e:
+            print(f"⚠️ Aviso: No se pudo cargar el favicon en el configurador. Error: {e}")
+
         apply_theme()
         self._build_ui()
         self.cargar()

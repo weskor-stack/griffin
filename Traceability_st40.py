@@ -29,6 +29,7 @@ import Type_test
 import leer_shop_order
 import procesar_registros
 import shopo_order_api
+import Shop_order_config
 
 def configurar_logging():
     """Configura el sistema de logging"""
@@ -320,11 +321,20 @@ amc_label.place(x=1120, y=610)
 # button_tcp.place(x=1050, y=250)
 
 
-label_user = ctk.CTkLabel(master=frame, text="User:")
-label_user.place(x=1050, y=250)
+# label_user = ctk.CTkLabel(master=frame, text="User:")
+# label_user.place(x=1050, y=250)
 
-label_users = ctk.CTkLabel(master=frame, text="Admin")
-label_users.place(x=1090, y=250)
+# # label_users = ctk.CTkLabel(master=frame, text="Admin")
+# label_users.place(x=1090, y=250)
+btn_config_shop_order = ctk.CTkButton(
+    master=frame, 
+    text="⚙ Shop Order", 
+    width=120, 
+    command=lambda: Shop_order_config.ConfiguradorUI(ctk.CTkToplevel(root)),
+    fg_color="#1565C0",
+    hover_color="#00479E"
+)
+btn_config_shop_order.place(x=1050, y=200)
 
 headers = [["Measurement","Value","Lower limit","Upper limit","Type","Unit","Result"]]
 
