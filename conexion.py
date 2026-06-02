@@ -2943,7 +2943,81 @@ def insert_configuratorst50_80(machine_id, operator, model_id, process_name, sho
     except Exception as e:
         if conn: conn.rollback()
         raise Exception(f"Fallo al insertar configuración inicial: {e}")
-    
+
+# ===================== Configurador items ST40 (Tabla 2.2 - 9 campos) =====================
+def configurador_st40():
+    """Lee los 9 items de configuración de ST40 (Tabla 2.2 del PDF).
+       Retorna: (machine_id, client_id, operator, password,
+                 model_id, process_name, print_macro, location, shop_flor)"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            SELECT machine_id, client_id, operator, password,
+                   model_id, process_name, print_macro, location, shop_flor
+            FROM configurador
+            LIMIT 1
+        """
+        cursor.execute(sql)
+        registro = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if registro:
+            return registro
+        else:
+            return ("", "", "", "", "", "", "", "", "")
+    except Exception as e:
+        print(f"Error en conexion.configurador_st40: {e}")
+        return "FAILED"
+
+def update_configurador_st40(machine_id, client_id, operator, password,
+                             model_id, process_name, print_macro, location, shop_flor):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            UPDATE configurador
+            SET machine_id = ?,
+                client_id = ?,
+                operator = ?,
+                password = ?,
+                model_id = ?,
+                process_name = ?,
+                print_macro = ?,
+                location = ?,
+                shop_flor = ?
+        """
+        cursor.execute(sql, (machine_id, client_id, operator, password,
+                             model_id, process_name, print_macro, location, shop_flor))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Fallo en Base de Datos: {e}")
+
+def insert_configurador_st40(machine_id, client_id, operator, password,
+                             model_id, process_name, print_macro, location, shop_flor):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            INSERT INTO configurador (machine_id, client_id, operator, password,
+                                      model_id, process_name, print_macro, location, shop_flor)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (machine_id, client_id, operator, password,
+                             model_id, process_name, print_macro, location, shop_flor))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al insertar configuración inicial ST40: {e}")
+
   ####Atributos st50-80
 
 def select_attributes_st50_80():
