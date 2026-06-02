@@ -2820,13 +2820,70 @@ def verificar_cantidad_componentes(serial_padre):
         return False
     
 
+#Configurador urls
+def select_api_configs_st50_80():
+
+    try:
+        conn   = get_connection()
+        cursor = conn.cursor()
+        sql = "SELECT url_data_id, tc_id, name, url_data FROM url_data ORDER BY url_data_id ASC"
+        cursor.execute(sql)
+        rows = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        return rows
+    except Exception as e:
+        print(f"Error en select_api_configs_st50_80: {e}")
+        return "FAILED"
+
+def update_api_by_name_st50_80(api_name, nueva_url):
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            UPDATE url_data 
+            SET url_data = ? 
+            WHERE name = ?
+        """
+        cursor.execute(sql, (nueva_url, api_name))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al actualizar URL de la API {api_name}: {e}")
+    
+def insert_api_by_name_st50_80(api_name, url_data):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            INSERT INTO url_data (name, url_data)
+            VALUES (?, ?)
+        """
+        cursor.execute(sql, (api_name, url_data))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al registrar la API {api_name}: {e}")
+    
 #CONFIGURADOR ST50-80
 def configuradorst50_80():
     try:
         conn = get_connection() 
         cursor = conn.cursor()  
         sql = """
-            SELECT machine_id, operator, model_id, process_name, shop_order 
+            SELECT machine_id, operator, model_id, process_name, shop_order, program_name_version 
             FROM configurador 
             LIMIT 1
         """
@@ -3010,7 +3067,7 @@ def insert_api_by_name_st50_80(api_name, url_data):
     except Exception as e:
         if conn: conn.rollback()
         raise Exception(f"Fallo al registrar la API {api_name}: {e}")
-    
+
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
 # parameters_electrical(['Ct', '50', '10', '100', 'Numeric', 'N', 'OK', 'Comentarios'],name)
