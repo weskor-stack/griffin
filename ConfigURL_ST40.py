@@ -165,6 +165,18 @@ class FormularioApiConfig:
             print(f"Error al cargar configuración: {e}")
 
     def guardar_todo(self):
+        # Validación: TODAS las URLs son obligatorias (solicitud de Edgar, 02-jun).
+        # Evita registros en blanco en url_data y conserva el orden de secuencia
+        # (shop order -> parentage -> unit -> interlocking -> conduit -> traceability).
+        faltantes = [nombre for nombre, entry in self.entries.items() if not entry.get().strip()]
+        if faltantes:
+            messagebox.showwarning(
+                "Campos obligatorios",
+                "Todas las URLs son obligatorias. Falta capturar:\n\n• " + "\n• ".join(faltantes),
+                parent=self.root
+            )
+            return
+
         if not messagebox.askyesno("Confirmar", "¿Desea guardar todos los cambios?"):
             return
         try:
