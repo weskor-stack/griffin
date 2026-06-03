@@ -170,7 +170,7 @@ def traceability_station_50_80(task_duration, serial_padre, part_number_padre, c
         except Exception: pass
         
         try:
-            ir = conexion.inspection_data(part_id)
+            ir = conexion.inspection_data3(part_id)
             if ir and isinstance(ir, list): all_test_rows.extend(ir)
         except Exception: pass
         
@@ -190,7 +190,7 @@ def traceability_station_50_80(task_duration, serial_padre, part_number_padre, c
             unidad = str(row[5]) if row[5] is not None else ""
             status_step = str(row[6]).upper() if row[6] is not None else "PASSED"
             name_step = str(row[11]) if row[11] is not None else "Measurement"
-            desc_step = str(row[10]) if row[10] is not None else "Description"
+            
         except Exception:
             continue
 
@@ -202,7 +202,7 @@ def traceability_station_50_80(task_duration, serial_padre, part_number_padre, c
 
         steps_list.append({
             "name": name_step,
-            "description": desc_step,
+            "description": name_step,  
             "comparator": "GELE",
             "lowLimit": lim_inf,
             "highLimit": lim_sup,
@@ -240,7 +240,7 @@ def traceability_station_50_80(task_duration, serial_padre, part_number_padre, c
             {
                 "command": "ReplaceTrackedComponent",
                 "ref_designator": f"{process_name}_{component_name_db}",
-                "component_id": component_part_number
+                "component_id": component_serial 
             }
         ]
     }

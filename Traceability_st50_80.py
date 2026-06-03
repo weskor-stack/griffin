@@ -97,6 +97,25 @@ def configurar_logging():
     
     return logger
 
+def keep_alive_database():
+    """Mantiene viva la conexión a la base de datos"""
+    try:
+        # Ejecutar una consulta simple cada 5 minutos
+        with conexion.conn.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        logging.debug("Keep-alive ejecutado")
+    except Exception as e:
+        logging.warning(f"Keep-alive falló: {e}")
+        # Intentar reconectar
+        try:
+            conexion.db_manager._connect()
+        except:
+            pass
+    
+    # Programar próximo keep-alive (5 minutos)
+    root.after(300000, keep_alive_database)
+
 logger = configurar_logging()
 
 
@@ -530,17 +549,16 @@ def worker(conn, addr):
                 match option[0]:
 
                     case "start":
-                        entry_piece.configure(state="normal")
                         entry_piece.focus_set()
                         clear_table_data()
                         COMPONENT = ""
                         scanned_component = ""
                         
                         if len(option) == 2 and option[-1] == '1/':
-                            entry_piece.configure(state="normal", textvariable=piece_name)
+                            entry_piece.configure(state=ctk.NORMAL, textvariable=piece_name)
                             piece_name.set("")
                             safe_insert("You can scan the part.", "green")
-                            logging.info("Iniciando ciclo: Esperando escaneo de Parent.")
+                            logging.info("You can scan the part.")
 
                             green_label.configure(image=image_green_full)
                             red_label.configure(image=image_red)
@@ -548,7 +566,7 @@ def worker(conn, addr):
                             try:
                                 url_data = conexion.obtener_url_api()
                                 if url_data == "FAILED" or not url_data:
-                                    safe_insert("[FAIL 1] Database query error in obtener_url_api", "red")
+                                    safe_insert("Database query error in obtener_url_api", "red")
                                     conn.send("FAILED, DB CONFIG ERROR".encode('UTF-8'))
                                     break
                                     
@@ -588,48 +606,48 @@ def worker(conn, addr):
                                         if elapsed_time >= 240:
                                             entry_piece.configure(state="readonly", textvariable=piece_name)
                                             piece_name.set("")
-                                            safe_insert("[FAIL 2] Timeout waiting for Parent scan.", "red")
+                                            safe_insert("Timeout waiting for Parent scan.", "red")
                                             conn.send("START-AGAIN".encode('UTF-8'))
                                             error_detectado = True
                                             break
                                         continue
                                     
                                     if len(name_piece) > 27:
-                                        # 🛑 BLOQUEAR CURSOR DURANTE CONSULTA AL PADRE
+                                        # BLOQUEO DE CURSOR
                                         entry_piece.configure(state="disabled")
-                                        logging.info(f"Parent escaneado: {name_piece}. Validando...")
                                         
                                         url_api_padre_raw = url_base_unit.replace("serialnumber", name_piece)
                                         url_api_padre = urllib.parse.unquote(url_api_padre_raw)
                                         
                                         try:
-                                            response_padre = requests.get(url_api_padre, timeout=10)
+                                            response_padre = requests.get(url_api_padre, timeout=30)
                                         except Exception as err_h:
-                                            entry_piece.configure(state="normal")
-                                            safe_insert(f"[FAIL 2] HTTP Connection Error: {err_h}", "red")
+                                            entry_piece.configure(state=ctk.NORMAL)
+                                            safe_insert(f"HTTP Connection Error: {err_h}", "red")
                                             conn.send("FAILED, UNIT OFFLINE".encode('UTF-8'))
                                             error_detectado = True
                                             break
                                             
                                         if response_padre.status_code != 200:
-                                            entry_piece.configure(state="normal")
-                                            safe_insert(f"[FAIL 2] API UNIT Parent HTTP {response_padre.status_code}", "red")
+                                            entry_piece.configure(state=ctk.NORMAL)
+                                            safe_insert(f"API UNIT Parent HTTP {response_padre.status_code}", "red")
                                             conn.send(f"FAILED, UNIT HTTP {response_padre.status_code}".encode('UTF-8'))
                                             error_detectado = True
                                             break
                                             
                                         try:
                                             json_padre = response_padre.json()
+                                            
                                             safe_insert(f"API UNIT R:\n{json.dumps(json_padre, indent=2)}\n", "blue")
                                         except Exception:
-                                            entry_piece.configure(state="normal")
-                                            safe_insert("[FAIL 3] API Parent invalid JSON structure", "red")
+                                            entry_piece.configure(state=ctk.NORMAL)
+                                            safe_insert("API Parent invalid JSON structure", "red")
                                             conn.send("FAILED, UNIT INVALID JSON".encode('UTF-8'))
                                             error_detectado = True
                                             break
                                             
                                         if str(json_padre.get("success")).lower() not in ("true", "1"):
-                                            entry_piece.configure(state="normal")
+                                            entry_piece.configure(state=ctk.NORMAL)
                                             msg_err = json_padre.get("message", "Rejected by Unit API Rules")
                                             safe_insert(f"❌ [UNIT REJECTED] {msg_err}", "red")
                                             conn.send("FAILED, UNIT REJECTED".encode('UTF-8'))
@@ -642,8 +660,8 @@ def worker(conn, addr):
                                             
                                         part_number_extraido = data_node_padre.get("part_number")
                                         if not part_number_extraido:
-                                            entry_piece.configure(state="normal")
-                                            safe_insert("[FAIL 3] Missing part_number in parent data", "red")
+                                            entry_piece.configure(state=ctk.NORMAL)
+                                            safe_insert("Missing part_number in parent data", "red")
                                             conn.send("FAILED, UNIT PN MISSING".encode('UTF-8'))
                                             error_detectado = True
                                             break
@@ -654,18 +672,17 @@ def worker(conn, addr):
                                         COMPONENT = scanned_component
                                         
                                         safe_insert(f"✅ Parent Registered: {SERIAL_PADRE_GLOBAL}", "green")
-                                        logging.info("Parent validado exitosamente.")
                                         heatsink_scanned = True
                                         
                                 if error_detectado or not heatsink_scanned:
                                     break
                                     
-                                entry_piece.configure(state="normal")
+                                # DESBLOQUEO DE CURSOR
+                                entry_piece.configure(state=ctk.NORMAL)
                                 entry_piece.delete(0, ctk.END)
                                 piece_name.set("") 
-                                entry_piece.focus_set()
                                 
-                                safe_insert("\nSCAN 2/2: Scan Component Serial Number", "green")
+                                safe_insert("\n🔍 SCAN 2/2: Scan Component Serial Number", "green")
                                 start_time_comp = time.time()
                                 comp_scanned = False
                                 
@@ -676,35 +693,33 @@ def worker(conn, addr):
                                     
                                     if len(scanned_component) == 0:
                                         if elapsed_comp >= 240:
-                                            entry_piece.configure(state="readonly")
                                             piece_name.set("")
-                                            safe_insert("[FAIL 5] Timeout waiting for Component scan.", "red")
+                                            safe_insert("Timeout waiting for Component scan.", "red")
                                             conn.send("START-AGAIN".encode('UTF-8'))
                                             error_detectado = True
                                             break
                                         continue
                                         
                                     if len(scanned_component) > 13:
-                                        # 🛑 BLOQUEAR CURSOR DURANTE CONSULTA AL COMPONENTE E INTERLOCKING
+                                        # BLOQUEO DE CURSOR
                                         entry_piece.configure(state="disabled")
-                                        logging.info(f"Component escaneado: {scanned_component}. Validando...")
                                         
                                         url_comp_base = url_base_unit.replace("/parentage/", "/")
                                         url_api_comp_raw = url_comp_base.replace("serialnumber", scanned_component)
                                         url_api_comp = urllib.parse.unquote(url_api_comp_raw)
                                         
                                         try:
-                                            response_comp = requests.get(url_api_comp, timeout=10)
+                                            response_comp = requests.get(url_api_comp, timeout=30)
                                         except Exception as err_u:
-                                            entry_piece.configure(state="normal")
-                                            safe_insert(f"[FAIL 5] HTTP Connection Error on Component: {err_u}", "red")
+                                            entry_piece.configure(state=ctk.NORMAL)
+                                            safe_insert(f"HTTP Connection Error on Component: {err_u}", "red")
                                             conn.send("FAILED, COMPONENT API OFFLINE".encode('UTF-8'))
                                             error_detectado = True
                                             break
                                             
                                         if response_comp.status_code != 200:
-                                            entry_piece.configure(state="normal")
-                                            safe_insert(f"[FAIL 5] Component API HTTP {response_comp.status_code}", "red")
+                                            entry_piece.configure(state=ctk.NORMAL)
+                                            safe_insert(f"Component API HTTP {response_comp.status_code}", "red")
                                             conn.send(f"FAILED, COMPONENT HTTP {response_comp.status_code}".encode('UTF-8'))
                                             error_detectado = True
                                             break
@@ -712,16 +727,16 @@ def worker(conn, addr):
                                         try:
                                             json_comp = response_comp.json()
                                         except Exception:
-                                            entry_piece.configure(state="normal")
-                                            safe_insert("[FAIL 6] Component invalid JSON payload", "red")
+                                            entry_piece.configure(state=ctk.NORMAL)
+                                            safe_insert("Component invalid JSON payload", "red")
                                             conn.send("FAILED, COMPONENT INVALID JSON".encode('UTF-8'))
                                             error_detectado = True
                                             break
                                             
                                         if str(json_comp.get("success")).lower() not in ("true", "1"):
-                                            entry_piece.configure(state="normal")
+                                            entry_piece.configure(state=ctk.NORMAL)
                                             msg_err_c = json_comp.get("message", "Rejected Component Serial")
-                                            safe_insert(f"[FAIL 6] Component Rejected: {msg_err_c}", "red")
+                                            safe_insert(f"Component Rejected: {msg_err_c}", "red")
                                             conn.send("FAILED, COMPONENT REJECTED".encode('UTF-8'))
                                             error_detectado = True
                                             break
@@ -732,8 +747,8 @@ def worker(conn, addr):
                                             
                                         comp_pn_extraido = data_node_comp.get("part_number")
                                         if not comp_pn_extraido:
-                                            entry_piece.configure(state="normal")
-                                            safe_insert("[FAIL 6] Missing part_number in component record", "red")
+                                            entry_piece.configure(state=ctk.NORMAL)
+                                            safe_insert("Missing part_number in component record", "red")
                                             conn.send("FAILED, COMPONENT PN MISSING".encode('UTF-8'))
                                             error_detectado = True
                                             break
@@ -742,7 +757,6 @@ def worker(conn, addr):
                                         component_sn = comp_pn_extraido
                                         
                                         safe_insert(f"✅ Component Registered: {COMPONENT}", "green")
-                                        logging.info("Component validado exitosamente.")
                                         comp_scanned = True
                                         
                                 if error_detectado or not comp_scanned:
@@ -756,41 +770,40 @@ def worker(conn, addr):
                                     component_sn 
                                 )
                                 
-                                logging.info(f"[INTERLOCKING JSON]:\n{json.dumps(interlocking_json_api, indent=4, ensure_ascii=False)}")
+                                # LOG CON INDENT=4
+                                logging.info(f"[INTERLOCKING JSON OUTBOUND]:\n{json.dumps(interlocking_json_api, indent=4, ensure_ascii=False)}")
                                 
                                 try:
                                     response_interlocking = requests.post(
                                         url_interlocking,
                                         json=interlocking_json_api,
-                                        timeout=15
+                                        timeout=30
                                     )
                                 except Exception as err_int:
-                                    safe_insert(f"[FAIL 7] HTTP Connection Error with Interlocking: {err_int}", "red")
+                                    safe_insert(f"HTTP Connection Error with Interlocking: {err_int}", "red")
                                     conn.send("FAILED, INTERLOCKING OFFLINE".encode('UTF-8'))
                                     break
                                     
                                 if response_interlocking.status_code != 200:
-                                    safe_insert(f"[FAIL 7] Interlocking Gateway HTTP {response_interlocking.status_code}", "red")
+                                    safe_insert(f"Interlocking HTTP {response_interlocking.status_code}", "red")
                                     conn.send(f"FAILED, INTERLOCKING HTTP {response_interlocking.status_code}".encode('UTF-8'))
                                     break
                                     
                                 data_interlocking = response_interlocking.json()
                                 
-                                logging.info(f"📥 [INTERLOCKING GATEWAY RESPONSE]:\n{json.dumps(data_interlocking, indent=4, ensure_ascii=False)}")
+                                # LOG CON INDENT=4
+                                logging.info(f"[INTERLOCKING RESPONSE]:\n{json.dumps(data_interlocking, indent=4, ensure_ascii=False)}")
                                 
                                 if not data_interlocking.get("success", False):
                                     error_msg = data_interlocking.get("message", "Business rule validation error")
-                                    safe_insert(f"[FAIL 7] Interlocking Denied cycle: {error_msg}", "red")
+                                    safe_insert(f"Interlocking Denied cycle: {error_msg}", "red")
                                     conn.send("FAILED, INTERLOCKING REJECT".encode('UTF-8'))
                                     break
                                     
                                 pantalla_final = (
-                                    f"✅ ALL VALIDATIONS PASSED\n Parent: {SERIAL_PADRE_GLOBAL}\n Component: {COMPONENT}"
                                     f"[API UNIT PARENT RESPONSE]:\n{json.dumps(json_padre, indent=2)}\n\n"
                                     f"[API UNIT COMPONENT RESPONSE]:\n{json.dumps(json_comp, indent=2)}\n\n"
-                                    f"[SENT TO INTERLOCKING GATEWAY]:\n{json.dumps(interlocking_json_api, indent=2)}\n\n"
-                                    f"[INTERLOCKING GATEWAY RESPONSE]:\n{json.dumps(data_interlocking, indent=2)}\n\n"
-                                    
+                                    f"✅ ALL VALIDATIONS PASSED\n Parent: {SERIAL_PADRE_GLOBAL}\n Component: {COMPONENT}"
                                 )
                                 safe_insert(pantalla_final, "green")
                                 
@@ -800,7 +813,7 @@ def worker(conn, addr):
                                 if parte_existente and parte_existente != "FAILED" and len(parte_existente) > 0:
                                     safe_insert(f"Pieza ya registrada, omitiendo piece_store.", "blue")
                                 else:
-                                    resultado_store = conexion.piece_store(name_piece)
+                                    conexion.piece_store(name_piece)
                                 
                                 conexionBitacora.event("SPP-001", f"Parent: {SERIAL_PADRE_GLOBAL}, Component: {COMPONENT}", month, day)
                                 conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
@@ -811,17 +824,147 @@ def worker(conn, addr):
                                 break
                                 
                             except Exception as e:
-                                safe_insert(f"❌ Exception Caught: {str(e)}", "red")
+                                safe_insert(f"Exception Caught: {str(e)}", "red")
+                                cadena = ""
+                                break
+                                
+                       # BLOQUE NUEVO PARA PLC
+                        elif len(option) == 4 and option[-1] == '1/':
+                            name_piece = str(option[1]).strip()
+                            scanned_component = str(option[2]).strip()
+                            
+                            safe_insert(f"Validating Parent & Component...", "orange")
+                            green_label.configure(image=image_green_full)
+                            red_label.configure(image=image_red)
+
+                            try:
+                                url_data = conexion.obtener_url_api()
+                                print(url_data)
+                                if url_data == "FAILED" or not url_data:
+                                    safe_insert("Database query error in obtener url api", "red")
+                                    conn.send("FAILED".encode('UTF-8'))
+                                    break
+                                
+                                url_base_unit = url_data[0][0]
+                                url_interlocking = url_data[1][0]                              
+                                                          
+                                url_api_padre_raw = url_base_unit.replace("serialnumber", name_piece)
+                                response_padre = requests.get(url_api_padre_raw, timeout=30)
+                                
+                                if response_padre.status_code != 200:
+                                    safe_insert(f"API UNIT Parent HTTP {response_padre.status_code}", "red")
+                                    conn.send(f"FAILED".encode('UTF-8'))
+                                    break
+
+                                json_padre = response_padre.json()
+                                logging.info(f"[API UNIT PARENT RESPONSE]:\n{json.dumps(json_padre, indent=4, ensure_ascii=False)}")
+                                data_api_unit_padre = json_padre.get("data", {})
+
+                                if isinstance(data_api_unit_padre, list):
+                                    json_padre = data_api_unit_padre[0]
+
+                                part_number_extraido_unit_padre = data_api_unit_padre.get("part_number", "")    
+
+                                if str(json_padre.get("success")).lower() not in ("true", "1"):
+                                    msg_err = json_padre.get("message", "Rejected by Unit API Rules")
+                                    safe_insert(f"❌ [UNIT PARENT]\n{json.dumps(json_padre, indent=2)}", "red")
+                                    conn.send("FAILED".encode('UTF-8'))
+                                    break
+                                
+                                data_node_padre = json_padre.get("data", {})
+                                if isinstance(data_node_padre, list):
+                                    data_node_padre = data_node_padre[0]
+
+                                part_number_extraido_unit_component = data_node_padre.get("part_number", "")
+
+                                url_comp_base = url_base_unit.replace("serialnumber", scanned_component)
+                                response_comp = requests.get(url_comp_base, timeout=30)
+
+                                if response_comp.status_code != 200:
+                                    safe_insert(f"Component API HTTP {response_comp.status_code}", "red")
+                                    conn.send(f"FAILED".encode('UTF-8'))
+                                    break
+
+                                json_comp = response_comp.json()
+                                logging.info(f"[API UNIT COMPONENT RESPONSE]:\n{json.dumps(json_comp, indent=4, ensure_ascii=False)}")
+                                response_unit_comp = json_comp.get("data", {})
+
+                                if isinstance(json_comp, list):
+                                    json_comp = json_comp[0]
+
+                                part_number_extraido_unit_comp = response_unit_comp.get("part_number", "")
+
+                                if str(json_comp.get("success")).lower() not in ("true", "1"):
+                                    safe_insert(f"❌ [UNIT COMPONENT REJECTED]\n{json.dumps(json_comp, indent=2)}", "red")
+                                    conn.send("FAILED".encode('UTF-8'))
+                                    break
+
+                                data_node_comp = json_comp.get("data", {})
+                                if isinstance(data_node_comp, list):
+                                    data_node_comp = data_node_comp[0] if len(data_node_comp) > 0 else {}
+                                comp_pn_extraido = data_node_comp.get("part_number")
+
+                                SERIAL_PADRE_GLOBAL = name_piece
+                                PART_NUMBER = part_number_extraido_unit_padre
+                                COMPONENT = scanned_component
+                                component_sn = part_number_extraido_unit_comp
+
+                                interlocking_json_api = interlocking_json.interlocking_station_50_80(
+                                    SERIAL_PADRE_GLOBAL,      
+                                    PART_NUMBER,       
+                                    component_sn 
+                                )
+                                
+                                logging.info(f"[INTERLOCKING JSON]:\n{json.dumps(interlocking_json_api, indent=4, ensure_ascii=False)}")
+                                response_interlocking = requests.post(url_interlocking, json=interlocking_json_api, timeout=30)
+
+                                if response_interlocking.status_code != 200:
+                                    safe_insert(f"Interlocking HTTP {response_interlocking.status_code}", "red")
+                                    conn.send(f"FAILED, INTERLOCKING HTTP {response_interlocking.status_code}".encode('UTF-8'))
+                                    break
+
+                                data_interlocking = response_interlocking.json()
+                                if isinstance(data_interlocking, list):
+                                    data_interlocking = data_interlocking[0] if len(data_interlocking) > 0 else {}
+
+                                logging.info(f"[INTERLOCKING RESPONSE]:\n{json.dumps(data_interlocking, indent=4, ensure_ascii=False)}")
+
+                                if not data_interlocking.get("success", False):
+                                    error_msg = data_interlocking.get("message", "Business rule validation error")
+                                    safe_insert(f"Interlocking Denied: {error_msg}", "red")
+                                    conn.send("FAILED, INTERLOCKING REJECT".encode('UTF-8'))
+                                    break
+
+                                pantalla_final = (
+                                    f"✅ ALL VALIDATIONS PASSED\n Parent: {SERIAL_PADRE_GLOBAL}\n Component: {COMPONENT}"
+                                    f"\n\n[API UNIT PARENT RESPONSE]:\n{json.dumps(json_padre, indent=2)}\n\n"
+                                    f"[API UNIT COMPONENT RESPONSE]:\n{json.dumps(json_comp, indent=2)}\n\n"
+                                    f"[INTERLOCKING REQUEST]:\n{json.dumps(interlocking_json_api, indent=2)}\n\n"
+                                    f"[INTERLOCKING RESPONSE]:\n{json.dumps(data_interlocking, indent=2)}\n\n"
+                                    
+                                )
+
+                                safe_insert(pantalla_final, "green")
+                                entry_piece.configure(state="readonly", textvariable=piece_name)
+                                piece_name.set(SERIAL_PADRE_GLOBAL)
+                                conn.send(f"{name_piece}, PASSED".encode('UTF-8'))
+
+                                parte_existente = conexion.obtener_parte(name_piece)
+                                if parte_existente and parte_existente != "FAILED" and len(parte_existente) > 0:
+                                    pass
+                                else:
+                                    conexion.piece_store(name_piece)
+
+                                conexionBitacora.event("SPP-001", f"Parent: {SERIAL_PADRE_GLOBAL}, Component: {COMPONENT}", month, day)
+                                entry_piece.configure(state="readonly", textvariable=piece_name)
+                                piece_name.set(SERIAL_PADRE_GLOBAL)
+                                break
+
+                            except Exception as e:
+                                safe_insert(f"❌ Exception Caught {str(e)}", "red")
                                 logging.error(f"Error general en case 'start': {str(e)}")
                                 cadena = ""
                                 break
-                        else:
-                            safe_insert("Command received-> "+cadena+"\n"+"Command FAILED", "red")
-                            conexionBitacora.event("SPP-002","|Command received| "+cadena,month,day)
-                            conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
-                            green_label.configure(image=image_green)
-                            red_label.configure(image=image_red_full)
-                            cadena = ""
 
                     case "reset":
                         for item in option:
@@ -899,8 +1042,9 @@ def worker(conn, addr):
                         for item in option:
                             cadena += str(item) + ","
                         part_name = entry_piece.get()                
+                        
                         if len(option) == 6 and option[-1] == '1/':
-                            duration = conexion.duration(cadena,option[4])
+                            duration = conexion.duration(cadena, option[4])
 
                             if duration == "PASSED":
                                 try:
@@ -923,29 +1067,31 @@ def worker(conn, addr):
                                         url_traceability,
                                         json=traceability_payload,
                                         headers={'Content-Type': 'application/json'},
-                                        timeout=10
+                                        timeout=30
                                     )
+                                    logging.info(f"[TRACEABILITY JSON]:\n{json.dumps(traceability_payload, indent=4, ensure_ascii=False)}")
                                     
                                     if response_traceability.status_code != 200:
-                                        safe_insert(f"❌ [GATEWAY ERROR {response_traceability.status_code}]:\n{response_traceability.text}\n", "red")
+                                        safe_insert(f"❌ERROR {response_traceability.status_code}]:\n{response_traceability.text}\n", "red")
                                         conn.send("FAILED, TRACEABILITY ERROR".encode('UTF-8'))
                                         cadena = ""
                                         continue
                                         
                                     json_trace = response_traceability.json()
+                                    logging.info(f"[TRACEABILITY RESPONSE JSON]:\n{json.dumps(json_trace, indent=4, ensure_ascii=False)}")
                                     validador_trace = json_trace.get("success")
                                     if str(validador_trace).lower() not in ("true", "1"):
                                         msg_err_t = json_trace.get("message", "Traceability validation rejected")
-                                        safe_insert(f"❌ [GATEWAY REJECTED 200]:\n{json.dumps(json_trace, indent=2)}\n", "red")
+                                        safe_insert(f"❌ [REJECTED 200]:\n{json.dumps(json_trace, indent=2)}\n", "red")
                                         conn.send("FAILED, TRACEABILITY REJECT".encode('UTF-8'))
                                         cadena = ""
                                         continue
 
                                     pantalla_end = (
                                         f"Command received-> {cadena}\nCommand END PROCESS PASSED\n"
-                                        f" Traceability Data Dispatched & Saved Successfully"
-                                        f"[SENT TO TRACEABILITY GATEWAY]:\n{json.dumps(traceability_payload, indent=4, ensure_ascii=False)}\n\n"
-                                        f"[TRACEABILITY GATEWAY RESPONSE]:\n{json.dumps(json_trace, indent=2)}\n\n"
+                                        f"\nTraceability Data Dispatched & Saved Successfully"
+                                        f"\n\n[TRACEABILITY]:\n{json.dumps(traceability_payload, indent=4, ensure_ascii=False)}\n\n"
+                                        f"[TRACEABILITY RESPONSE]:\n{json.dumps(json_trace, indent=2)}\n\n"
                                         
                                     )
 
@@ -953,7 +1099,7 @@ def worker(conn, addr):
 
                                 except Exception as err_trace:
                                     logging.error(f"Error executing traceability dispatch: {err_trace}")
-                                    safe_insert(f"[FAIL 8] Traceability Network Error: {str(err_trace)}", "red")
+                                    safe_insert(f"Traceability Network Error: {str(err_trace)}", "red")
                                     conn.send("FAILED, TRACEABILITY OFFLINE".encode('UTF-8'))
                                     cadena = ""
                                     continue
@@ -1380,6 +1526,9 @@ def application():
         # Bind el evento de cierre de ventana a close_app
         root.protocol("WM_DELETE_WINDOW", safe_exit)
 
+        # Iniciar keep-alive de BD
+        keep_alive_database()
+        
         threading.Thread(target=accept_connections, daemon=True).start()
 
         root.mainloop()
