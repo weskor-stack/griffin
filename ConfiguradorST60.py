@@ -142,16 +142,21 @@ class ConfiguradorUI:
 
         try:
             # La tabla 'configurador' mantiene SIEMPRE una sola fila.
-            # El configurador SOLO sobrescribe (UPDATE) las columnas de ST60 e
-            # ignora el resto; nunca inserta una fila nueva.
+            # Regla (Edgar): SIEMPRE UPDATE (sobrescribe solo las columnas de ST60,
+            # ignora el resto). Solo se INSERTA una vez si la tabla NO tiene ninguna
+            # fila (BD recién creada). Nunca duplica por ejecución.
             args = (v["program_name_version"], v["machine_id"], v["process_name"],
                     v["client_id"], v["operator"])
 
-            exito = conexion.update_configurador_st60(*args)
+            filas = conexion.update_configurador_st60(*args)
 
-            if exito:
-                messagebox.showinfo("Éxito", "Configuración ST60 actualizada correctamente.", parent=self.root)
-                self.root.destroy()
+            # filas == 0 puede ser: tabla vacía O fila sin cambios. Solo insertamos
+            # si la tabla está REALMENTE vacía (evita duplicar al guardar sin cambios).
+            if filas == 0 and conexion.contar_configurador() == 0:
+                conexion.insert_configurador_st60(*args)
+
+            messagebox.showinfo("Éxito", "Configuración ST60 guardada correctamente.", parent=self.root)
+            self.root.destroy()
         except Exception as e:
             messagebox.showerror("Error DB", str(e), parent=self.root)
 

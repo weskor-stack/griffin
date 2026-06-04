@@ -3031,6 +3031,22 @@ def configurador_st60():
         print(f"Error en conexion.configurador_st60: {e}")
         return "FAILED"
 
+def contar_configurador():
+    """Devuelve el número de filas en la tabla 'configurador'.
+       Útil para decidir entre UPDATE (ya existe la fila única) o INSERT
+       (solo cuando la tabla está realmente vacía)."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM configurador")
+        total = cursor.fetchone()[0]
+        cursor.close()
+        conn.close()
+        return int(total)
+    except Exception as e:
+        print(f"Error en conexion.contar_configurador: {e}")
+        return -1
+
 def update_configurador_st60(program_name_version, machine_id, process_name, client_id, operator):
     try:
         conn = get_connection()
@@ -3044,10 +3060,11 @@ def update_configurador_st60(program_name_version, machine_id, process_name, cli
                 operator = ?
         """
         cursor.execute(sql, (program_name_version, machine_id, process_name, client_id, operator))
+        filas = cursor.rowcount          # filas afectadas por el UPDATE
         conn.commit()
         cursor.close()
         conn.close()
-        return True
+        return filas
     except Exception as e:
         if conn:
             conn.rollback()
