@@ -247,14 +247,212 @@ def traceability_station_50_80(task_duration, serial_padre, part_number_padre, c
 
     return payload
 
+def traceability_station_40(bandera, serial_padre, part_number_padre, component_serial, component_part_number, defect_code_default):
+    configurador = conexion.configurador()
+    machine_name = configurador[0]
+    client_id = configurador[6]
+    id_operator = configurador[2]
+    password = configurador[7]
+    model_id = configurador[9]
+    process_name = configurador[1]
+    print_macro = configurador[10]
+    location = configurador[11]
+    shop_flor = configurador[12]
+    
+    part_row = conexion.pieces(serial_padre)
+    station = conexion.stations()
+    piece_id = part_row[0]
+    duration = conexion.duration_json(station[0], piece_id)
+    start_duration = part_row[3]
+    end_duration = duration[4]
+    all_test_rows = []
+
+    atributos = conexion.select_attributes_st50_80()
+    
+    # Crear un diccionario para mapear nombres de atributos con sus códigos de defecto
+    atributos_map = {}
+    for attr in atributos:
+        nombre_atributo = attr[1].lower()  # Normalizar a minúsculas para comparación
+        atributos_map[nombre_atributo] = {
+            'defect_code_low': attr[5],   # defect_code para límite inferior
+            'defect_code_high': attr[6],  # defect_code_high para límite superior
+            'name': attr[1],
+            'unit': attr[2],
+            'lower_limit': attr[3],
+            'upper_limit': attr[4]
+        }
+    
+    if part_row:
+        part_id = part_row[0]
+        
+        # También podemos agregar el nombre de la tabla de origen a cada registro
+        try:
+            sr = conexion.screwing_data(part_id)
+            if sr and isinstance(sr, list):
+                # Agregar origen a cada tupla para identificar la prueba
+                for item in sr:
+                    all_test_rows.append(item + ('screwing',))
+        except Exception: pass
+        
+        try:
+            pr = conexion.pressfit_data(part_id)
+            if pr and isinstance(pr, list):
+                for item in pr:
+                    all_test_rows.append(item + ('pressfit',))
+        except Exception: pass
+        
+        try:
+            ir = conexion.inspection_data4(part_id)
+            if ir and isinstance(ir, list):
+                for item in ir:
+                    all_test_rows.append(item + ('inspection',))
+        except Exception: pass
+        
+        try:
+            er = conexion.electrical_data(part_id)
+            if er and isinstance(er, list):
+                for item in er:
+                    all_test_rows.append(item + ('electrical',))
+        except Exception: pass
+
+    steps_list = []
+    global_status = "PASS"
+
+    for row in all_test_rows:
+        try:
+            val_medido = float(row[1]) if row[1] is not None else 0.0
+            lim_inf = float(row[2]) if row[2] is not None else 0.0
+            lim_sup = float(row[3]) if row[3] is not None else 0.0
+            unidad = str(row[5]) if row[5] is not None else ""
+            status_step = str(row[6]).upper() if row[6] is not None else "PASSED"
+            name_step = str(row[11]) if row[11] is not None else "Measurement"
+            desc_step = str(row[11]) if row[11] is not None else "Description"
+            # Obtener el origen de la prueba (screwing, pressfit, inspection, electrical)
+            test_source = str(row[12]) if len(row) > 12 else ""
+        except Exception:
+            continue
+
+        if status_step == "FAILED":
+            global_status = "FAILED"
+            
+            # Buscar el atributo según el nombre de la prueba
+            # Primero intentamos con el nombre exacto de la fuente
+            defect_code_low = defect_code_default
+            defect_code_high = defect_code_default
+            
+            # Mapeamos el source con el nombre del atributo en la tabla attribute
+            # Ajusta estos nombres según los valores reales en tu tabla attribute
+            source_to_attribute = {
+                'screwing': 'screwing',
+                'pressfit': 'pressfit', 
+                'inspection': 'inspection',  # o 'Inspction'
+                'electrical': 'electrical'
+            }
+            
+            attr_name = source_to_attribute.get(test_source, name_step.lower())
+            
+            # Buscar en el mapa de atributos
+            if attr_name in atributos_map:
+                defect_code_low = atributos_map[attr_name]['defect_code_low']
+                defect_code_high = atributos_map[attr_name]['defect_code_high']
+            else:
+                # También intentar buscar por el nombre_step
+                if name_step.lower() in atributos_map:
+                    defect_code_low = atributos_map[name_step.lower()]['defect_code_low']
+                    defect_code_high = atributos_map[name_step.lower()]['defect_code_high']
+            
+            # Asignar el defect_code según si falló por debajo o arriba del límite
+            if val_medido < lim_inf:
+                step_defect = defect_code_low
+            elif val_medido > lim_sup:
+                step_defect = defect_code_high
+            else:
+                step_defect = defect_code_default
+        else:
+            step_defect = ""
+
+        steps_list.append({
+            "name": name_step,
+            "description": desc_step,
+            "comparator": "N/A",
+            "lowLimit": lim_inf,
+            "highLimit": lim_sup,
+            "units": unidad,
+            "status": status_step,
+            "value": val_medido,
+            "defect_code": step_defect
+        })
+
+    program_version = configurador[4]
+
+    if bandera == 1:
+        payload = {
+            "serial": part_number_padre,
+            "product": component_serial,
+            "station": machine_name,
+            "operator": id_operator,
+            "start_time": str(start_duration),
+            "end_time": str(end_duration),
+            "process_name": process_name,
+            "status": global_status,
+            "test_steps": {
+                "STEPS LIST": steps_list
+            },
+            "commands": [
+                {
+                    "command": "ReplaceNontrackedComponent",
+                    "ref_designator": f"{process_name}_Station ID",
+                    "component_id": machine_name
+                },
+                {
+                    "command": "ReplaceNontrackedComponent",
+                    "ref_designator": f"{process_name}_Program ID",
+                    "component_id": program_version 
+                },
+                {
+                    "command": "ReplaceTrackedComponent",
+                    "ref_designator": f"{process_name}_Heatsink",
+                    "component_id": serial_padre
+                }
+            ]
+        }
+    else:
+        payload = {
+            "serial": component_serial,
+            "product": part_number_padre,
+            "station": machine_name,
+            "operator": id_operator,
+            "start_time": str(start_duration),
+            "end_time": str(end_duration),
+            "process_name": process_name,
+            "status": global_status,
+            "test_steps": {
+                "STEPS LIST": steps_list
+            },
+            "commands": [
+                {
+                    "command": "ReplaceNontrackedComponent",
+                    "ref_designator": f"{process_name}_Station ID",
+                    "component_id": machine_name
+                },
+                {
+                    "command": "ReplaceNontrackedComponent",
+                    "ref_designator": f"{process_name}_Program ID",
+                    "component_id": program_version   
+                }
+            ]
+        }
+
+    return payload
+
 # if __name__ == "__main__":
-#     resultado_json = traceability_station_50_80(
-#         serial_number = "P2173404-00-C:SEYU26061A0765",
-#         parent_serial_number="P1106394-71-P:SE4A25079000001",
-#         parent_part_number="1231284792783",           
-#         heater_serial_number="P2170207-00-E:SE4A26127000245", 
-#         plc_value="2.33",                                      
-#         plc_defect_code="PLC_DEFAULT_001"
+#     resultado_json = traceability_station_40(
+#         bandera = 2,
+#         serial_padre = "P1517040-01-G:REV01:SANN26097000001",
+#         part_number_padre="P1106394-71-P:SE4A250790000019",
+#         component_serial="P2170207-00-E:SE4A26127000245",  
+#         component_part_number="1231284792783",                                 
+#         defect_code_default="PLC_DEFAULT_001"
 #     )
     
 #     if isinstance(resultado_json, dict):
