@@ -3007,6 +3007,70 @@ def insert_configurador_st40(machine_id, client_id, operator, password,
         if conn: conn.rollback()
         raise Exception(f"Fallo al insertar configuración inicial ST40: {e}")
 
+# ===================== Configurador items ST100 (Tabla 2.2 - 6 campos) =====================
+def configurador_st100():
+    """Lee los 6 items de configuración de ST100 (Tabla 2.2 del PDF).
+       Retorna: (machine_id, client_id, operator, password, model_id, process_name)"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            SELECT machine_id, client_id, operator, password, model_id, process_name
+            FROM configurador
+            LIMIT 1
+        """
+        cursor.execute(sql)
+        registro = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if registro:
+            return registro
+        else:
+            return ("", "", "", "", "", "")
+    except Exception as e:
+        print(f"Error en conexion.configurador_st100: {e}")
+        return "FAILED"
+
+def update_configurador_st100(machine_id, client_id, operator, password, model_id, process_name):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            UPDATE configurador
+            SET machine_id = ?,
+                client_id = ?,
+                operator = ?,
+                password = ?,
+                model_id = ?,
+                process_name = ?
+        """
+        cursor.execute(sql, (machine_id, client_id, operator, password, model_id, process_name))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Fallo en Base de Datos: {e}")
+
+def insert_configurador_st100(machine_id, client_id, operator, password, model_id, process_name):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            INSERT INTO configurador (machine_id, client_id, operator, password, model_id, process_name)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (machine_id, client_id, operator, password, model_id, process_name))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al insertar configuración inicial ST100: {e}")
+
   ####Atributos st50-80
 
 def select_attributes_st50_80():
