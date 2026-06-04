@@ -2876,6 +2876,161 @@ def insert_configuratorst50_80(machine_id, operator, model_id, process_name, sho
     except Exception as e:
         if conn: conn.rollback()
         raise Exception(f"Fallo al insertar configuración inicial: {e}")
+
+# ===================== Configurador items ST40 (Tabla 2.2 - 9 campos) =====================
+def configurador_st40():
+    """Lee los 9 items de configuración de ST40 (Tabla 2.2 del PDF).
+       Retorna: (machine_id, client_id, operator, password,
+                 model_id, process_name, print_macro, location, shop_flor)"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            SELECT machine_id, client_id, operator, password,
+                   model_id, process_name, print_macro, location, shop_flor
+            FROM configurador
+            LIMIT 1
+        """
+        cursor.execute(sql)
+        registro = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if registro:
+            return registro
+        else:
+            return ("", "", "", "", "", "", "", "", "")
+    except Exception as e:
+        print(f"Error en conexion.configurador_st40: {e}")
+        return "FAILED"
+
+def update_configurador_st40(machine_id, client_id, operator, password,
+                             model_id, process_name, print_macro, location, shop_flor):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            UPDATE configurador
+            SET machine_id = ?,
+                client_id = ?,
+                operator = ?,
+                password = ?,
+                model_id = ?,
+                process_name = ?,
+                print_macro = ?,
+                location = ?,
+                shop_flor = ?
+        """
+        cursor.execute(sql, (machine_id, client_id, operator, password,
+                             model_id, process_name, print_macro, location, shop_flor))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Fallo en Base de Datos: {e}")
+
+def insert_configurador_st40(machine_id, client_id, operator, password,
+                             model_id, process_name, print_macro, location, shop_flor):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            INSERT INTO configurador (machine_id, client_id, operator, password,
+                                      model_id, process_name, print_macro, location, shop_flor)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (machine_id, client_id, operator, password,
+                             model_id, process_name, print_macro, location, shop_flor))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al insertar configuración inicial ST40: {e}")
+
+# ===================== Configurador items ST60 (Tabla 2.2 - 5 campos) =====================
+def configurador_st60():
+    """Lee los 5 items de configuración de ST60 (Tabla 2.2 del PDF).
+       Retorna: (program_name_version, machine_id, process_name, client_id, operator)"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            SELECT program_name_version, machine_id, process_name, client_id, operator
+            FROM configurador
+            LIMIT 1
+        """
+        cursor.execute(sql)
+        registro = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if registro:
+            return registro
+        else:
+            return ("", "", "", "", "")
+    except Exception as e:
+        print(f"Error en conexion.configurador_st60: {e}")
+        return "FAILED"
+
+def contar_configurador():
+    """Devuelve el número de filas en la tabla 'configurador'.
+       Útil para decidir entre UPDATE (ya existe la fila única) o INSERT
+       (solo cuando la tabla está realmente vacía)."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM configurador")
+        total = cursor.fetchone()[0]
+        cursor.close()
+        conn.close()
+        return int(total)
+    except Exception as e:
+        print(f"Error en conexion.contar_configurador: {e}")
+        return -1
+
+def update_configurador_st60(program_name_version, machine_id, process_name, client_id, operator):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            UPDATE configurador
+            SET program_name_version = ?,
+                machine_id = ?,
+                process_name = ?,
+                client_id = ?,
+                operator = ?
+        """
+        cursor.execute(sql, (program_name_version, machine_id, process_name, client_id, operator))
+        filas = cursor.rowcount          # filas afectadas por el UPDATE
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return filas
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Fallo en Base de Datos: {e}")
+
+def insert_configurador_st60(program_name_version, machine_id, process_name, client_id, operator):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            INSERT INTO configurador (program_name_version, machine_id, process_name, client_id, operator)
+            VALUES (?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (program_name_version, machine_id, process_name, client_id, operator))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al insertar configuración inicial ST60: {e}")
+
     
   ####Atributos st50-80
 
