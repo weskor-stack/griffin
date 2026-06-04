@@ -3503,6 +3503,89 @@ def screwing_data4(part_id):
         conn.close()
 
     return screwing
+
+#===================== Configurador items ST100 (Tabla 2.2 - 6 campos) =====================
+def configurador_st100():
+    """Lee los 6 items de configuración de ST100 (Tabla 2.2 del PDF).
+       Retorna: (machine_id, client_id, operator, password, model_id, process_name)"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            SELECT machine_id, client_id, operator, password, model_id, process_name
+            FROM configurador
+            LIMIT 1
+        """
+        cursor.execute(sql)
+        registro = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if registro:
+            return registro
+        else:
+            return ("", "", "", "", "", "")
+    except Exception as e:
+        print(f"Error en conexion.configurador_st100: {e}")
+        return "FAILED"
+
+def contar_configurador():
+    """Devuelve el número de filas en la tabla 'configurador'.
+       Útil para decidir entre UPDATE (ya existe la fila única) o INSERT
+       (solo cuando la tabla está realmente vacía)."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM configurador")
+        total = cursor.fetchone()[0]
+        cursor.close()
+        conn.close()
+        return int(total)
+    except Exception as e:
+        print(f"Error en conexion.contar_configurador: {e}")
+        return -1
+
+def update_configurador_st100(machine_id, client_id, operator, password, model_id, process_name):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            UPDATE configurador
+            SET machine_id = ?,
+                client_id = ?,
+                operator = ?,
+                password = ?,
+                model_id = ?,
+                process_name = ?
+        """
+        cursor.execute(sql, (machine_id, client_id, operator, password, model_id, process_name))
+        filas = cursor.rowcount          # filas afectadas por el UPDATE
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return filas
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Fallo en Base de Datos: {e}")
+
+def insert_configurador_st100(machine_id, client_id, operator, password, model_id, process_name):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            INSERT INTO configurador (machine_id, client_id, operator, password, model_id, process_name)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (machine_id, client_id, operator, password, model_id, process_name))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al insertar configuración inicial ST100: {e}")
+
+
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
 # parameters_electrical(['Ct', '50', '10', '100', 'Numeric', 'N', 'OK', 'Comentarios'],name)
