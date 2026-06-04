@@ -1,0 +1,7 @@
+Total de registros extraídos: 4
+
+part_number|serial_number|process_name
+2102110-00-C|MODEL1-001-0000003|Testing Process
+2102110-00-C|MODEL1-001-0000015|Assembly Process
+2102110-00-C|MODEL1-001-0000016|Assembly Process
+2102110-00-C|MODEL1-001-0000017|PRP_Process
