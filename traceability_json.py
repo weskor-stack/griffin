@@ -302,7 +302,7 @@ def traceability_station_40(bandera, serial_padre, part_number_padre, component_
         except Exception: pass
         
         try:
-            ir = conexion.inspection_data3(part_id)
+            ir = conexion.inspection_data4(part_id)
             if ir and isinstance(ir, list):
                 for item in ir:
                     all_test_rows.append(item + ('inspection',))
@@ -316,7 +316,7 @@ def traceability_station_40(bandera, serial_padre, part_number_padre, component_
         except Exception: pass
 
     steps_list = []
-    global_status = "PASSED"
+    global_status = "PASS"
 
     for row in all_test_rows:
         try:
@@ -374,7 +374,7 @@ def traceability_station_40(bandera, serial_padre, part_number_padre, component_
         steps_list.append({
             "name": name_step,
             "description": desc_step,
-            "comparator": "GELE",
+            "comparator": "N/A",
             "lowLimit": lim_inf,
             "highLimit": lim_sup,
             "units": unidad,
@@ -387,8 +387,8 @@ def traceability_station_40(bandera, serial_padre, part_number_padre, component_
 
     if bandera == 1:
         payload = {
-            "serial": serial_padre,
-            "product": part_number_padre,
+            "serial": part_number_padre,
+            "product": component_serial,
             "station": machine_name,
             "operator": id_operator,
             "start_time": str(start_duration),
@@ -412,13 +412,13 @@ def traceability_station_40(bandera, serial_padre, part_number_padre, component_
                 {
                     "command": "ReplaceTrackedComponent",
                     "ref_designator": f"{process_name}_Heatsink",
-                    "component_id": component_part_number
+                    "component_id": serial_padre
                 }
             ]
         }
     else:
         payload = {
-            "serial": serial_padre,
+            "serial": component_serial,
             "product": part_number_padre,
             "station": machine_name,
             "operator": id_operator,
@@ -445,17 +445,17 @@ def traceability_station_40(bandera, serial_padre, part_number_padre, component_
 
     return payload
 
-if __name__ == "__main__":
-    resultado_json = traceability_station_40(
-        bandera = 1,
-        serial_padre = "P1517040-01-G:REV01:SANN26097000001",
-        part_number_padre="P1106394-71-P:SE4A250790000019",
-        component_serial="P2170207-00-E:SE4A26127000245",  
-        component_part_number="1231284792783",                                 
-        defect_code_default="PLC_DEFAULT_001"
-    )
+# if __name__ == "__main__":
+#     resultado_json = traceability_station_40(
+#         bandera = 2,
+#         serial_padre = "P1517040-01-G:REV01:SANN26097000001",
+#         part_number_padre="P1106394-71-P:SE4A250790000019",
+#         component_serial="P2170207-00-E:SE4A26127000245",  
+#         component_part_number="1231284792783",                                 
+#         defect_code_default="PLC_DEFAULT_001"
+#     )
     
-    if isinstance(resultado_json, dict):
-        print(json.dumps(resultado_json, indent=4))
-    else:
-        print(f"\nError:\n{resultado_json}")
+#     if isinstance(resultado_json, dict):
+#         print(json.dumps(resultado_json, indent=4))
+#     else:
+#         print(f"\nError:\n{resultado_json}")

@@ -83,9 +83,9 @@ def conduit_st40(serial_number):
             }
         ]
     }
-    print(json.dumps(conduit_json, indent=4))
+    # print(json.dumps(conduit_json, indent=4))
     return conduit_json
 
 
 
-conduit_st40("P1135558-04-A:SANN26097000001")
+# conduit_st40("P1135558-04-A:SANN26097000001")

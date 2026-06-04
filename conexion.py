@@ -3054,71 +3054,33 @@ def update_configurador_shop_order_st40(shop_order, qty_components, conn):
         raise Exception(f"Fallo en Base de Datos: {e}")
     
 def inspection_data4(part_id):
-    inspection = []
-    conn = get_connection()
-    if conn is None:
-        return inspection
-
     try:
         with conn.cursor() as cursor:
-            sql = '''
-                SELECT t.*
-                FROM parameters_inspection t
-                LEFT JOIN (
-                    -- Último registro por measurement_name
-                    SELECT
-                        measurement_name,
-                        MAX(parameters_inspection_id) AS ultimo_id
-                    FROM parameters_inspection
-                    GROUP BY measurement_name
-                ) u 
-                    ON u.measurement_name = t.measurement_name
-                LEFT JOIN parameters_inspection ult
-                    ON ult.measurement_name = u.measurement_name
-                AND ult.parameters_inspection_id = u.ultimo_id
-                LEFT JOIN (
-                    -- FAIL con mayor número de reintentos por measurement_name
-                    SELECT
-                        measurement_name,
-                        MAX(reintentos) AS max_reintento
-                    FROM parameters_inspection
-                    WHERE status = 'FAIL'
-                    AND reintentos IS NOT NULL
-                    AND reintentos > 0
-                    GROUP BY measurement_name
-                ) f 
-                    ON f.measurement_name = t.measurement_name
-                WHERE
-                (
-                    -- 1) Siempre mostrar PASS
-                    t.status = 'PASS'
-
-                    -- 2) FAIL sin reintentos (solo si el último NO es PASS)
-                    OR (
-                        t.status = 'FAIL'
-                        AND (t.reintentos IS NULL OR t.reintentos = 0)
-                        AND ult.status <> 'PASS'
-                    )
-
-                    -- 3) FAIL con el mayor número de reintentos (solo si el último NO es PASS)
-                    OR (
-                        t.status = 'FAIL'
-                        AND t.reintentos = f.max_reintento
-                        AND ult.status <> 'PASS'
-                    )
-                )
-                AND t.part_id = %s
-                AND t.status_id = 1
-                ORDER BY t.measurement_name, t.parameters_inspection_id;
-            '''
-            cursor.execute(sql, (part_id,))
-            inspection = cursor.fetchall()
+            cursor.execute('''
+                SELECT 
+                    parameters_inspection.inspection_measurement_id, 
+                    value, 
+                    low_limit, 
+                    high_limit, 
+                    data_type, 
+                    unit, 
+                    result, 
+                    compoperator, 
+                    test_time, 
+                    metadata, 
+                    description, 
+                    inspection_measurement.name 
+                FROM parameters_inspection 
+                INNER JOIN data_tracking_griffin.inspection_measurement 
+                    ON inspection_measurement.inspection_measurement_id = parameters_inspection.inspection_measurement_id
+                WHERE part_id = %s
+                ORDER BY parameters_inspection_id DESC
+                LIMIT 1
+            ''', (part_id,))
+            return cursor.fetchall()
     except Exception as e:
-        print(f"Error fetching inspection data: {e}")
-    finally:
-        conn.close()
-
-    return inspection
+        # print(f"[ERROR] inspection_data(): {e}")
+        return []
 
 def pressfit_data4(part_id):
     pressfit = []

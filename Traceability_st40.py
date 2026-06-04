@@ -10,12 +10,12 @@ from tkinter import StringVar, messagebox
 import tkinter.messagebox as tkmsg
 from CTkTable import *
 # PC name
+import commands_st40
 import get_name_PC
 # MySQL conexión
 import conexion
 import conexionBitacora
 from datetime import datetime, timezone, timedelta 
-import commands
 import data_json
 import os
 import requests
@@ -33,6 +33,7 @@ import shopo_order_api
 import Shop_order_config
 import json
 import conduit_json
+import traceability_json
 
 def configurar_logging():
     """Configura el sistema de logging"""
@@ -945,7 +946,13 @@ Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Numb
                                 safe_insert(f"📡 Calling Parentage API for: {name_piece}", "blue")
                                         
                                 url_parentage_completa = url_parentage.replace("serialnumber", name_piece)
-                                response_parentage = requests.get(url_parentage_completa, timeout=30)
+                                try:
+                                    response_parentage = requests.get(url_parentage_completa, timeout=30)
+                                except requests.exceptions.RequestException as e:
+                                    logging.error(f"Error de conexión con API Parentage: {str(e)}")
+                                    safe_insert(f"❌ Error de conexión con API Parentage: {str(e)}", "red")
+                                    conn.send("FAILED".encode('UTF-8'))
+                                    break
                                         
                                 if response_parentage.status_code != 200:
                                     logging.error(f"Parentage API failed: {response_parentage.status_code}")
@@ -968,7 +975,13 @@ Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Numb
                                     # ========== INVOKE API UNIT ==========
                                     safe_insert(f"📡 Calling Unit API for piece: {name_piece}", "blue")
                                     url_api_unit_completa = url_api_unit.replace("serialnumber", name_piece)
-                                    response_unit = requests.get(url_api_unit_completa, timeout=30)
+                                    try:
+                                        response_unit = requests.get(url_api_unit_completa, timeout=30)
+                                    except requests.exceptions.RequestException as e:
+                                        logging.error(f"Error de conexión con API Unit: {str(e)}")
+                                        safe_insert(f"❌ Error de conexión con API Unit: {str(e)}", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        break
 
                                     if response_unit.status_code != 200:
                                         logging.error(f"Unit API failed for {name_piece}: {response_unit.status_code}")
@@ -1018,12 +1031,17 @@ Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Numb
                                     )
 
                                     logging.info(f"Interlocking JSON: {json.dumps(interlocking_json_api, indent=4)}")
-                                            
-                                    response_interlocking = requests.post(
-                                        url_interlocking,
-                                        json=interlocking_json_api,
-                                        timeout=30
-                                    )
+                                    try:        
+                                        response_interlocking = requests.post(
+                                            url_interlocking,
+                                            json=interlocking_json_api,
+                                            timeout=30
+                                        )
+                                    except requests.exceptions.RequestException as e:
+                                        logging.error(f"Error de conexión con API Interlocking: {str(e)}")
+                                        safe_insert(f"❌ Error de conexión con API Interlocking: {str(e)}", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        break
 
                                     if response_interlocking.status_code != 200:
                                         logging.error(f"Interlocking failed: {response_interlocking.json()}")
@@ -1117,11 +1135,17 @@ Extracted from Unit API - Part Number: {unit_part_number}, Serial Number: {unit_
 
                                 logging.info(f"Interlocking JSON: {json.dumps(interlocking_json_api, indent=4)}")
                                         
-                                response_interlocking = requests.post(
-                                    url_interlocking,
-                                    json=interlocking_json_api,
-                                    timeout=30
-                                )
+                                try:
+                                    response_interlocking = requests.post(
+                                        url_interlocking,
+                                        json=interlocking_json_api,
+                                        timeout=30
+                                    )
+                                except requests.exceptions.RequestException as e:
+                                    logging.error(f"Error de conexión con API Interlocking: {str(e)}")
+                                    safe_insert(f"❌ Error de conexión con API Interlocking: {str(e)}", "red")
+                                    conn.send("FAILED".encode('UTF-8'))
+                                    break
 
                                 if response_interlocking.status_code != 200:
                                     logging.error(f"Interlocking failed: {response_interlocking.json()}")
@@ -1309,7 +1333,9 @@ Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Numb
                             cadena += str(item) + ","
 
                         part_name = entry_piece.get()
-                                        
+                        
+                        url_data = conexion.obtener_url_api()
+                        url_traceability = url_data[5][0]
                         if len(option) == 6 and option[-1] == '1/':
                             duration = conexion.duration(cadena,option[4])
 
@@ -1317,27 +1343,96 @@ Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Numb
                                 # entry_piece.configure(state="readonly", textvariable=piece_name)
                                 # piece_name.set("")
                                 if BANDERA == 1:
-                                    SHOP_ORDER_SERIAL_NUMBER
-                                    SHOP_ORDER_PART_NUMBER
-                                    UNIT_PART_NUMBER
-                                safe_insert("Command received-> "+cadena+"\n"+"Command END PROCESS PASSED"+"\n")
+                                    traceability_json_api = traceability_json.traceability_station_40(
+                                        BANDERA,
+                                        option[4],
+                                        SHOP_ORDER_SERIAL_NUMBER,
+                                        SHOP_ORDER_PART_NUMBER,
+                                        UNIT_PART_NUMBER,
+                                        ""
+                                    )
+
+                                    logging.info(f"Traceability JSON: {json.dumps(traceability_json_api, indent=4)}")
+
+                                    try:        
+                                        response_traceability = requests.post(
+                                            url_traceability,
+                                            json=traceability_json_api,
+                                            timeout=30
+                                        )
+                                    except requests.exceptions.RequestException as e:
+                                        logging.error(f"Error de conexión con API Traceability: {str(e)}")
+                                        safe_insert(f"❌ Error de conexión con API Traceability: {str(e)}", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        break
+
+                                    if response_traceability.status_code != 200:
+                                        logging.error(f"Traceability failed: {response_traceability.json()}")
+                                        safe_insert(f"❌ Traceability API failed: {response_traceability.json()}", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        break
+
+                                    data_traceability = response_traceability.json()
+
+                                    if not data_traceability.get("success", False):
+                                        error_msg = data_traceability.get("message", "Unknown error")
+                                        logging.error(f"Traceability denied: {error_msg}")
+                                        safe_insert(f"❌ Traceability API Denied: {error_msg}", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        break
+                                else:
+                                    traceability_json_api = traceability_json.traceability_station_40(
+                                        BANDERA,
+                                        option[4],
+                                        PARENT_PART_NUMBER,
+                                        PARENT_SERIAL_NUMBER,
+                                        "",
+                                        ""
+                                    )
+
+                                    logging.info(f"Traceability JSON: {json.dumps(traceability_json_api, indent=4)}")
+
+                                    try:        
+                                        response_traceability = requests.post(
+                                            url_traceability,
+                                            json=traceability_json_api,
+                                            timeout=30
+                                        )
+                                    except requests.exceptions.RequestException as e:
+                                        logging.error(f"Error de conexión con API Traceability: {str(e)}")
+                                        safe_insert(f"❌ Error de conexión con API Traceability: {str(e)}", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        break
+
+                                    if response_traceability.status_code != 200:
+                                        logging.error(f"Traceability failed: {response_traceability.json()}")
+                                        safe_insert(f"❌ Traceability API failed: {response_traceability.json()}", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        break
+
+                                    data_traceability = response_traceability.json()
+
+                                    if not data_traceability.get("success", False):
+                                        error_msg = data_traceability.get("message", "Unknown error")
+                                        logging.error(f"Traceability denied: {error_msg}")
+                                        safe_insert(f"❌ Traceability API Denied: {error_msg}", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        break
+
                                 try:
                                     conn.send("PASSED".encode('UTF-8'))
                                 except Exception as e:
                                     safe_insert(f"Error enviando: {e}", "red")
-
-                                try:
-                                    print(f"bandera: {BANDERA}")
-                                except:
-                                    print("Error")
                                 
-                                        
+                                resultado, mensaje = procesar_registros.procesar_primer_registro()
+                                safe_insert(f"Command received-> {cadena}\nCommand END PROCESS PASSED\nTraceability JSON: {json.dumps(traceability_json_api, indent=4)}\nResponse: {json.dumps(data_traceability, indent=4)}\n", "green")
+                                                                        
                             else:
                                 try:
                                     conn.send("FAILED".encode('UTF-8'))
                                 except Exception as e:
                                     safe_insert(f"Error enviando: {e}", "red")
-                                safe_insert("Command received-> "+cadena+"\n"+"Command FAILED"+"\n","red")
+                                safe_insert(f"Command received-> {cadena}\n"+"Command FAILED"+"\n","red")
                                 conexionBitacora.event("ENDP-002","|Command received| "+cadena,month,day)
                                 conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
 
@@ -1348,7 +1443,7 @@ Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Numb
                                 conn.send("FAILED".encode('UTF-8'))
                             except Exception as e:
                                 safe_insert(f"Error enviando: {e}", "red")
-                            safe_insert("Command received-> "+cadena+"\n"+"Command FAILED"+"\n","red")
+                            safe_insert(f"Command received-> {cadena}\n"+"Command FAILED"+"\n","red")
 
                             conexionBitacora.event("ENDP-002","|Command received| "+cadena,month,day)
                             conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
@@ -1463,7 +1558,10 @@ Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Numb
                                         
                             else:
                                 part_name = entry_piece.get()
-                                commit_options, table_data = commands.commit(cadena, part_name)
+                                if BANDERA == 1:
+                                    commit_options, table_data = commands_st40.commit(cadena, part_name,SHOP_ORDER_SERIAL_NUMBER)
+                                else:
+                                    commit_options, table_data = commands_st40.commit(cadena, part_name,PARENT_SERIAL_NUMBER)
                         
                                 if(commit_options == 'PASSED'):
                                     if table_data:
