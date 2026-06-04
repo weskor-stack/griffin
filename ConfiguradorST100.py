@@ -142,23 +142,22 @@ class ConfiguradorUI:
             return
 
         try:
-            datos_actuales = conexion.configurador_st100()
-            vacio = (datos_actuales == "FAILED"
-                     or datos_actuales == ("", "", "", "", "", ""))
-
+            # La tabla 'configurador' mantiene SIEMPRE una sola fila.
+            # Regla (Edgar): SIEMPRE UPDATE (sobrescribe solo las columnas de ST100,
+            # ignora el resto). Solo se INSERTA una vez si la tabla NO tiene ninguna
+            # fila (BD recién creada). Nunca duplica por ejecución.
             args = (v["machine_id"], v["client_id"], v["operator"],
                     v["password"], v["model_id"], v["process_name"])
 
-            if vacio:
-                exito = conexion.insert_configurador_st100(*args)
-                mensaje = "Configuración inicial ST100 creada con éxito."
-            else:
-                exito = conexion.update_configurador_st100(*args)
-                mensaje = "Configuración ST100 actualizada correctamente."
+            filas = conexion.update_configurador_st100(*args)
 
-            if exito:
-                messagebox.showinfo("Éxito", mensaje, parent=self.root)
-                self.root.destroy()
+            # filas == 0 puede ser: tabla vacía O fila sin cambios. Solo insertamos
+            # si la tabla está REALMENTE vacía (evita duplicar al guardar sin cambios).
+            if filas == 0 and conexion.contar_configurador() == 0:
+                conexion.insert_configurador_st100(*args)
+
+            messagebox.showinfo("Éxito", "Configuración ST100 guardada correctamente.", parent=self.root)
+            self.root.destroy()
         except Exception as e:
             messagebox.showerror("Error DB", str(e), parent=self.root)
 
