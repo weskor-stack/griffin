@@ -3007,6 +3007,69 @@ def insert_configurador_st40(machine_id, client_id, operator, password,
         if conn: conn.rollback()
         raise Exception(f"Fallo al insertar configuración inicial ST40: {e}")
 
+# ===================== Configurador items ST60 (Tabla 2.2 - 5 campos) =====================
+def configurador_st60():
+    """Lee los 5 items de configuración de ST60 (Tabla 2.2 del PDF).
+       Retorna: (program_name_version, machine_id, process_name, client_id, operator)"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            SELECT program_name_version, machine_id, process_name, client_id, operator
+            FROM configurador
+            LIMIT 1
+        """
+        cursor.execute(sql)
+        registro = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if registro:
+            return registro
+        else:
+            return ("", "", "", "", "")
+    except Exception as e:
+        print(f"Error en conexion.configurador_st60: {e}")
+        return "FAILED"
+
+def update_configurador_st60(program_name_version, machine_id, process_name, client_id, operator):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            UPDATE configurador
+            SET program_name_version = ?,
+                machine_id = ?,
+                process_name = ?,
+                client_id = ?,
+                operator = ?
+        """
+        cursor.execute(sql, (program_name_version, machine_id, process_name, client_id, operator))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Fallo en Base de Datos: {e}")
+
+def insert_configurador_st60(program_name_version, machine_id, process_name, client_id, operator):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            INSERT INTO configurador (program_name_version, machine_id, process_name, client_id, operator)
+            VALUES (?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (program_name_version, machine_id, process_name, client_id, operator))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al insertar configuración inicial ST60: {e}")
+
   ####Atributos st50-80
 
 def select_attributes_st50_80():
