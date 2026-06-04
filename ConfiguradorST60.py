@@ -141,22 +141,16 @@ class ConfiguradorUI:
             return
 
         try:
-            datos_actuales = conexion.configurador_st60()
-            vacio = (datos_actuales == "FAILED"
-                     or datos_actuales == ("", "", "", "", ""))
-
+            # La tabla 'configurador' mantiene SIEMPRE una sola fila.
+            # El configurador SOLO sobrescribe (UPDATE) las columnas de ST60 e
+            # ignora el resto; nunca inserta una fila nueva.
             args = (v["program_name_version"], v["machine_id"], v["process_name"],
                     v["client_id"], v["operator"])
 
-            if vacio:
-                exito = conexion.insert_configurador_st60(*args)
-                mensaje = "Configuración inicial ST60 creada con éxito."
-            else:
-                exito = conexion.update_configurador_st60(*args)
-                mensaje = "Configuración ST60 actualizada correctamente."
+            exito = conexion.update_configurador_st60(*args)
 
             if exito:
-                messagebox.showinfo("Éxito", mensaje, parent=self.root)
+                messagebox.showinfo("Éxito", "Configuración ST60 actualizada correctamente.", parent=self.root)
                 self.root.destroy()
         except Exception as e:
             messagebox.showerror("Error DB", str(e), parent=self.root)
