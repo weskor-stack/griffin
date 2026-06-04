@@ -1002,7 +1002,7 @@ def duration(element, name_piece):
 def pieces(parte):
     try:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 2 AND part_number = %s ORDER BY part_id DESC LIMIT 1",(parte,))
+            cursor.execute("SELECT part_id, part_number, model_id, create_registration FROM part WHERE status_id = 2 AND part_number = %s ORDER BY part_id DESC LIMIT 1",(parte,))
             part = cursor.fetchone()
             if not part:
                 return None  # O podrías lanzar una excepción si prefieres
@@ -2451,7 +2451,8 @@ def configurador():
         cursor = conn.cursor()
         cursor.execute("""
             SELECT machine_id, process_name, operator, station, 
-                   program_name_version, qty_components, client_id, password
+                   program_name_version, qty_components, client_id, password, shop_order, model_id,
+                   print_macro, location, shop_flor
             FROM configurador 
             LIMIT 1
         """)
@@ -3052,6 +3053,339 @@ def update_configurador_shop_order_st40(shop_order, qty_components, conn):
         # Lanzamos el error hacia la interfaz gráfica para que aparezca en pantalla
         raise Exception(f"Fallo en Base de Datos: {e}")
     
+def inspection_data4(part_id):
+    inspection = []
+    conn = get_connection()
+    if conn is None:
+        return inspection
+
+    try:
+        with conn.cursor() as cursor:
+            sql = '''
+                SELECT t.*
+                FROM parameters_inspection t
+                LEFT JOIN (
+                    -- Último registro por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(parameters_inspection_id) AS ultimo_id
+                    FROM parameters_inspection
+                    GROUP BY measurement_name
+                ) u 
+                    ON u.measurement_name = t.measurement_name
+                LEFT JOIN parameters_inspection ult
+                    ON ult.measurement_name = u.measurement_name
+                AND ult.parameters_inspection_id = u.ultimo_id
+                LEFT JOIN (
+                    -- FAIL con mayor número de reintentos por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(reintentos) AS max_reintento
+                    FROM parameters_inspection
+                    WHERE status = 'FAIL'
+                    AND reintentos IS NOT NULL
+                    AND reintentos > 0
+                    GROUP BY measurement_name
+                ) f 
+                    ON f.measurement_name = t.measurement_name
+                WHERE
+                (
+                    -- 1) Siempre mostrar PASS
+                    t.status = 'PASS'
+
+                    -- 2) FAIL sin reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND (t.reintentos IS NULL OR t.reintentos = 0)
+                        AND ult.status <> 'PASS'
+                    )
+
+                    -- 3) FAIL con el mayor número de reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND t.reintentos = f.max_reintento
+                        AND ult.status <> 'PASS'
+                    )
+                )
+                AND t.part_id = %s
+                AND t.status_id = 1
+                ORDER BY t.measurement_name, t.parameters_inspection_id;
+            '''
+            cursor.execute(sql, (part_id,))
+            inspection = cursor.fetchall()
+    except Exception as e:
+        print(f"Error fetching inspection data: {e}")
+    finally:
+        conn.close()
+
+    return inspection
+
+def pressfit_data4(part_id):
+    pressfit = []
+    conn = get_connection()
+    if conn is None:
+        return pressfit
+
+    try:
+        with conn.cursor() as cursor:
+            sql = '''
+                SELECT t.*
+                FROM parameters_pressfit t
+                LEFT JOIN (
+                    -- Último registro por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(parameters_pressfit_id) AS ultimo_id
+                    FROM parameters_pressfit
+                    GROUP BY measurement_name
+                ) u 
+                    ON u.measurement_name = t.measurement_name
+                LEFT JOIN parameters_pressfit ult
+                    ON ult.measurement_name = u.measurement_name
+                AND ult.parameters_pressfit_id = u.ultimo_id
+                LEFT JOIN (
+                    -- FAIL con mayor número de reintentos por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(reintentos) AS max_reintento
+                    FROM parameters_pressfit
+                    WHERE status = 'FAIL'
+                    AND reintentos IS NOT NULL
+                    AND reintentos > 0
+                    GROUP BY measurement_name
+                ) f 
+                    ON f.measurement_name = t.measurement_name
+                WHERE
+                (
+                    -- 1) Siempre mostrar PASS
+                    t.status = 'PASS'
+
+                    -- 2) FAIL sin reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND (t.reintentos IS NULL OR t.reintentos = 0)
+                        AND ult.status <> 'PASS'
+                    )
+
+                    -- 3) FAIL con el mayor número de reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND t.reintentos = f.max_reintento
+                        AND ult.status <> 'PASS'
+                    )
+                )
+                AND t.part_id = %s
+                ORDER BY t.measurement_name, t.parameters_pressfit_id;
+            '''
+            cursor.execute(sql, (part_id,))
+            pressfit = cursor.fetchall()
+    except Exception as e:
+        print(f"Error fetching pressfit data: {e}")
+    finally:
+        conn.close()
+
+    return pressfit
+
+def continuity_data4(part_id):
+    continuity = []
+    conn = get_connection()
+    if conn is None:
+        return continuity
+
+    try:
+        with conn.cursor() as cursor:
+            sql = '''
+                SELECT t.*
+                FROM parameters_continuty t
+                LEFT JOIN (
+                    -- Último registro por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(parameters_continuity_id) AS ultimo_id
+                    FROM parameters_continuty
+                    GROUP BY measurement_name
+                ) u 
+                    ON u.measurement_name = t.measurement_name
+                LEFT JOIN parameters_continuty ult
+                    ON ult.measurement_name = u.measurement_name
+                AND ult.parameters_continuity_id = u.ultimo_id
+                LEFT JOIN (
+                    -- FAIL con mayor número de reintentos por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(reintentos) AS max_reintento
+                    FROM parameters_continuty
+                    WHERE status = 'FAIL'
+                    AND reintentos IS NOT NULL
+                    AND reintentos > 0
+                    GROUP BY measurement_name
+                ) f 
+                    ON f.measurement_name = t.measurement_name
+                WHERE
+                (
+                    -- 1) Siempre mostrar PASS
+                    t.status = 'PASS'
+
+                    -- 2) FAIL sin reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND (t.reintentos IS NULL OR t.reintentos = 0)
+                        AND ult.status <> 'PASS'
+                    )
+
+                    -- 3) FAIL con el mayor número de reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND t.reintentos = f.max_reintento
+                        AND ult.status <> 'PASS'
+                    )
+                )
+                AND t.part_id = %s
+                AND t.status_status_id = 1
+                ORDER BY t.measurement_name, t.parameters_continuity_id;
+            '''
+            cursor.execute(sql, (part_id,))
+            continuity = cursor.fetchall()
+    except Exception as e:
+        print(f"Error fetching pressfit data: {e}")
+    finally:
+        conn.close()
+
+    return continuity
+
+def electrical_data4(part_id):
+    electrical = []
+    conn = get_connection()
+    if conn is None:
+        return electrical
+
+    try:
+        with conn.cursor() as cursor:
+            sql = '''
+                SELECT t.*
+                FROM parameters_electrical t
+                LEFT JOIN (
+                    -- Último registro por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(parameters_electrical_id) AS ultimo_id
+                    FROM parameters_electrical
+                    GROUP BY measurement_name
+                ) u 
+                    ON u.measurement_name = t.measurement_name
+                LEFT JOIN parameters_electrical ult
+                    ON ult.measurement_name = u.measurement_name
+                AND ult.parameters_electrical_id = u.ultimo_id
+                LEFT JOIN (
+                    -- FAIL con mayor número de reintentos por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(reintentos) AS max_reintento
+                    FROM parameters_electrical
+                    WHERE status = 'FAIL'
+                    AND reintentos IS NOT NULL
+                    AND reintentos > 0
+                    GROUP BY measurement_name
+                ) f 
+                    ON f.measurement_name = t.measurement_name
+                WHERE
+                (
+                    -- 1) Siempre mostrar PASS
+                    t.status = 'PASS'
+
+                    -- 2) FAIL sin reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND (t.reintentos IS NULL OR t.reintentos = 0)
+                        AND ult.status <> 'PASS'
+                    )
+
+                    -- 3) FAIL con el mayor número de reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND t.reintentos = f.max_reintento
+                        AND ult.status <> 'PASS'
+                    )
+                )
+                AND t.part_id = %s
+                AND t.status_id = 1
+                ORDER BY t.measurement_name, t.parameters_electrical_id;
+            '''
+            cursor.execute(sql, (part_id,))
+            electrical = cursor.fetchall()
+    except Exception as e:
+        print(f"Error fetching pressfit data: {e}")
+    finally:
+        conn.close()
+
+    return electrical
+
+def screwing_data4(part_id):
+    screwing = []
+    conn = get_connection()
+    if conn is None:
+        return screwing
+
+    try:
+        with conn.cursor() as cursor:
+            sql = '''
+                SELECT t.*
+                FROM parameters_screwing t
+                LEFT JOIN (
+                    -- Último registro por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(parameters_screwing_id) AS ultimo_id
+                    FROM parameters_screwing
+                    GROUP BY measurement_name
+                ) u 
+                    ON u.measurement_name = t.measurement_name
+                LEFT JOIN parameters_screwing ult
+                    ON ult.measurement_name = u.measurement_name
+                AND ult.parameters_screwing_id = u.ultimo_id
+                LEFT JOIN (
+                    -- FAIL con mayor número de reintentos por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(reintentos) AS max_reintento
+                    FROM parameters_screwing
+                    WHERE status = 'FAIL'
+                    AND reintentos IS NOT NULL
+                    AND reintentos > 0
+                    GROUP BY measurement_name
+                ) f 
+                    ON f.measurement_name = t.measurement_name
+                WHERE
+                (
+                    -- 1) Siempre mostrar PASS
+                    t.status = 'PASS'
+
+                    -- 2) FAIL sin reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND (t.reintentos IS NULL OR t.reintentos = 0)
+                        AND ult.status <> 'PASS'
+                    )
+
+                    -- 3) FAIL con el mayor número de reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND t.reintentos = f.max_reintento
+                        AND ult.status <> 'PASS'
+                    )
+                )
+                AND t.part_id = %s
+                AND t.status_id = 1
+                ORDER BY t.measurement_name, t.parameters_screwing_id;
+            '''
+            cursor.execute(sql, (part_id,))
+            screwing = cursor.fetchall()
+    except Exception as e:
+        print(f"Error fetching screwing data: {e}")
+    finally:
+        conn.close()
+
+    return screwing
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
 # parameters_electrical(['Ct', '50', '10', '100', 'Numeric', 'N', 'OK', 'Comentarios'],name)

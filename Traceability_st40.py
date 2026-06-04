@@ -26,10 +26,13 @@ import logging
 import traceback
 import Attributes
 import Type_test
+import interlocking_json
 import leer_shop_order
 import procesar_registros
 import shopo_order_api
 import Shop_order_config
+import json
+import conduit_json
 
 def configurar_logging():
     """Configura el sistema de logging"""
@@ -499,7 +502,8 @@ def safe_insert(msg, text_color=None):
 
 def worker(conn, addr):
     # Declaramos el uso de las variables globales para la API de Interlocking
-    global SHOP_ORDER_PART_NUMBER, SHOP_ORDER_SERIAL_NUMBER, UNIT_PART_NUMBER, PARENT_PART_NUMBER, PARENT_SERIAL_NUMBER
+    global SHOP_ORDER_PART_NUMBER, SHOP_ORDER_SERIAL_NUMBER, UNIT_PART_NUMBER, UNIT_SERIAL_NUMBER, PARENT_PART_NUMBER, PARENT_SERIAL_NUMBER
+    global BANDERA
     cadena = ""
     pieza = ""
     contador = 0
@@ -628,12 +632,17 @@ def worker(conn, addr):
                                         data_parentage_json = response_parentage.json()
                                         data_parentage = data_parentage_json.get("data", {})
 
+                                        logging.info(f"Parentage API response for {name_piece}: {json.dumps(data_parentage_json, indent=4)}")
+                                        logging.info(f"Extracted from Parentage API - Part Number: {data_parentage}")
+
+                                        # Si en la sección de datos no viene nada o viene una lista vacía, intentar con Unit API
                                         if not data_parentage or (isinstance(data_parentage, list) and not data_parentage):
                                             logging.warning("Datos de parentage vacíos o no existentes")
                                             safe_insert("⚠️ Parentage API returned empty data", "yellow")
                                             
+                                            # ========== INVOKE API UNIT ==========
                                             safe_insert(f"📡 Calling Unit API for piece: {name_piece}", "blue")
-                                            url_api_unit_completa = url_api_unit.replace("heater_serial_number", name_piece)
+                                            url_api_unit_completa = url_api_unit.replace("serialnumber", name_piece)
                                             response_unit = requests.get(url_api_unit_completa, timeout=30)
 
                                             if response_unit.status_code != 200:
@@ -646,6 +655,9 @@ def worker(conn, addr):
                                             data_unit = data_unit.get("data", {})
                                             unit_part_number = data_unit.get("part_number", "")
                                             unit_serial_number = data_unit.get("serial_number", "")
+
+                                            logging.info(f"Unit API response for {name_piece}: {json.dumps(data_unit, indent=4)}")
+                                            logging.info(f"Extracted from Unit API - Part Number: {unit_part_number}, Serial Number: {unit_serial_number}")
                                             
                                             registros_reales = procesar_registros.verificar_archivos()
                                             
@@ -667,7 +679,76 @@ def worker(conn, addr):
                                             SHOP_ORDER_PART_NUMBER = sop_part_number
                                             SHOP_ORDER_SERIAL_NUMBER = sop_serial_number
                                             
+                                            # ========== INVOKE API INTERLOCKING ==========
+                                            safe_insert(f"\n🔗 Calling Interlocking API...", "blue")
+                                            safe_insert(f"   📤 Sending parameters:", "blue")
+                                            safe_insert(f"      - Serial Parent: {SHOP_ORDER_SERIAL_NUMBER}", "blue")
+                                            safe_insert(f"      - Part Number Parent: {SHOP_ORDER_PART_NUMBER}", "blue")
+                                            safe_insert(f"      - Heatsink_pn (unique): {UNIT_PART_NUMBER}", "blue")
                                             
+                                            interlocking_json_api = interlocking_json.interlocking_station_40_empty_data(
+                                                SHOP_ORDER_SERIAL_NUMBER,
+                                                SHOP_ORDER_PART_NUMBER,
+                                                UNIT_PART_NUMBER
+                                            )
+
+                                            logging.info(f"Interlocking JSON: {json.dumps(interlocking_json_api, indent=4)}")
+                                            
+                                            response_interlocking = requests.post(
+                                                url_interlocking,
+                                                json=interlocking_json_api,
+                                                timeout=30
+                                            )
+
+                                            if response_interlocking.status_code != 200:
+                                                logging.error(f"Interlocking failed: {response_interlocking.json()}")
+                                                safe_insert(f"❌ Interlocking API failed: {response_interlocking.json()}", "red")
+                                                conn.send("FAILED".encode('UTF-8'))
+                                                break
+
+                                            data_interlocking = response_interlocking.json()
+
+                                            if not data_interlocking.get("success", False):
+                                                error_msg = data_interlocking.get("message", "Unknown error")
+                                                logging.error(f"Interlocking denied: {error_msg}")
+                                                safe_insert(f"❌ Interlocking API Denied: {error_msg}", "red")
+                                                conn.send("FAILED".encode('UTF-8'))
+                                                break
+
+                                            conduit_json_api = conduit_json.conduit_st40(
+                                                SHOP_ORDER_SERIAL_NUMBER
+                                            )
+                                            logging.info(f"Conduit JSON: {json.dumps(conduit_json_api, indent=4)}")
+
+                                            try:
+                                                response_conduit = requests.post(url_conduit, json=conduit_json_api, timeout=30)
+
+                                                if response_conduit.status_code == 200:
+                                                    conduit_response = response_conduit.json()
+                                                    logging.info(f"CONDUIT Response: {json.dumps(conduit_response, indent=2)}")
+                                                
+                                                else:
+                                                    logging.warning(f"⚠️ CONDUIT API error: Status {response_conduit.status_code}")
+                                                    safe_insert(f"[{addr}] ❌ ⚠️ CONDUIT API error: Status {response_conduit.status_code}", "red")
+                                                    conn.send("FAILED".encode('UTF-8'))
+                                                    break
+                                            except requests.exceptions.RequestException as e:
+                                                logging.error(f"[{addr}] ❌ Error de conexión con API Conduit: {str(e)}")
+                                                safe_insert(f"[{addr}] ❌ Error de conexión con API Conduit: {str(e)}", "red")
+                                                conn.send("FAILED".encode('UTF-8'))
+                                                break
+
+                                            # ========== PROCESO EXITOSO ==========
+                                            safe_insert(f'''✅✅✅ ALL VALIDATIONS PASSED ✅✅✅\n⚠️ Parentage API returned empty data\n📡 Calling Unit API for piece: {name_piece}\nUnit API response for {name_piece}: {json.dumps(data_unit, indent=4)}\n
+Extracted from Unit API - Part Number: {unit_part_number}, Serial Number: {unit_serial_number}\nInterlocking JSON: {json.dumps(interlocking_json_api, indent=4)}\nResponse: {json.dumps(data_interlocking, indent=4)}\nConduit JSON: {json.dumps(conduit_json_api, indent=4)}\nCONDUIT Response: {json.dumps(conduit_response, indent=2)}''', "green")
+                                            
+                                            conexion.piece_store(name_piece)
+                                            piece = name_piece + ", PASSED"
+                                            entry_piece.configure(state="readonly", textvariable=piece_name)
+                                            piece_name.set(name_piece)
+
+                                            conn.send(piece.encode('UTF-8'))
+                                            BANDERA = 1
                                             break
                                         
                                         if isinstance(data_parentage, list) and data_parentage:
@@ -675,6 +756,85 @@ def worker(conn, addr):
                                         
                                         part_number_parentage = data_parentage.get("parent_part_number", "")
                                         serial_number_parentage = data_parentage.get("serial_number", "")
+
+                                        logging.info(f"Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Number: {serial_number_parentage}")
+
+                                        registros_reales = procesar_registros.verificar_archivos()
+                                            
+                                        configurador = conexion.configurador()
+                                        sop_order = configurador[8]
+                                        qty_sp_order = configurador[5]
+                                        if registros_reales == "EMPTY_FILE":
+                                            exito, nombre, cantidad = shopo_order_api.consultar_api_y_guardar(url_shop_order, sop_order, qty_sp_order)
+                                            sop_part_number, sop_serial_number, sop_process_name = leer_shop_order.leer_archivo_generado()
+                                        elif registros_reales == "EMPTY_DATA":
+                                            exito, nombre, cantidad = shopo_order_api.consultar_api_y_guardar(url_shop_order, sop_order, qty_sp_order)
+                                            sop_part_number, sop_serial_number, sop_process_name = leer_shop_order.leer_archivo_generado()
+                                        else:
+                                            sop_part_number, sop_serial_number, sop_process_name = leer_shop_order.leer_archivo_generado()
+                                        
+                                        SHOP_ORDER_SERIAL_NUMBER = sop_serial_number
+
+                                        PARENT_PART_NUMBER, PARENT_SERIAL_NUMBER = part_number_parentage, serial_number_parentage
+
+                                        # ========== INVOKE API INTERLOCKING ==========
+                                        safe_insert(f"\n🔗 Calling Interlocking API...", "blue")
+                                        safe_insert(f"   📤 Sending parameters:", "blue")
+                                        safe_insert(f"      - Serial Parent: {PARENT_SERIAL_NUMBER}", "blue")
+                                        safe_insert(f"      - Part Number Parent: {PARENT_PART_NUMBER}", "blue")
+                                        safe_insert(f"      - Heatsink_pn (unique): {SHOP_ORDER_SERIAL_NUMBER}", "blue")
+                                            
+                                        interlocking_json_api = interlocking_json.interlocking_station_40(
+                                            SHOP_ORDER_SERIAL_NUMBER,
+                                            PARENT_PART_NUMBER
+                                        )
+
+                                        logging.info(f"Interlocking JSON: {json.dumps(interlocking_json_api, indent=4)}")
+                                            
+                                        response_interlocking = requests.post(
+                                            url_interlocking,
+                                            json=interlocking_json_api,
+                                            timeout=30
+                                        )
+
+                                        if response_interlocking.status_code != 200:
+                                            logging.error(f"Interlocking failed: {response_interlocking.json()}")
+                                            safe_insert(f"❌ Interlocking API failed: {response_interlocking.json()}", "red")
+                                            conn.send("FAILED".encode('UTF-8'))
+                                            break
+
+                                        data_interlocking = response_interlocking.json()
+
+                                        if not data_interlocking.get("success", False):
+                                            error_msg = data_interlocking.get("message", "Unknown error")
+                                            logging.error(f"Interlocking denied: {error_msg}")
+                                            safe_insert(f"❌ Interlocking API Denied: {error_msg}", "red")
+                                            conn.send("FAILED".encode('UTF-8'))
+                                            break
+
+                                        conduit_json_api = conduit_json.conduit_st40(
+                                            PARENT_SERIAL_NUMBER
+                                        )
+                                        logging.info(f"Conduit JSON: {json.dumps(conduit_json_api, indent=4)}")
+
+                                        try:
+                                            response_conduit = requests.post(url_conduit, json=conduit_json_api, timeout=30)
+
+                                            if response_conduit.status_code == 200:
+                                                conduit_response = response_conduit.json()
+                                                logging.info(f"CONDUIT Response: {json.dumps(conduit_response, indent=2)}")
+                                                
+                                            else:
+                                                logging.warning(f"⚠️ CONDUIT API error: Status {response_conduit.status_code}")
+                                                safe_insert(f"[{addr}] ❌ ⚠️ CONDUIT API error: Status {response_conduit.status_code}", "red")
+                                                conn.send("FAILED".encode('UTF-8'))
+                                                break
+                                        except requests.exceptions.RequestException as e:
+                                            logging.error(f"[{addr}] ❌ Error de conexión con API Conduit: {str(e)}")
+                                            safe_insert(f"[{addr}] ❌ Error de conexión con API Conduit: {str(e)}", "red")
+                                            conn.send("FAILED".encode('UTF-8'))
+                                            break
+
                                         piece = name_piece + ", PASSED"
                                         # try:
                                         #     conn.send(piece.encode('UTF-8'))
@@ -684,12 +844,11 @@ def worker(conn, addr):
                                         piece_name.set(name_piece)
 
                                         conn.send(piece.encode('UTF-8'))
-                                        safe_insert("[ROUTE CHECK] Confirmation sent to PLC\n", "green")
-                                        logging.info("[ROUTE CHECK] Confirmation sent to PLC")
 
                                         # Almacenar la pieza en la base de datos
                                         conexion.piece_store(name_piece)
                                                     
+                                        BANDERA = 2
                                         # Registrar en bitácora
                                         conexionBitacora.event(
                                         "SPP-001",
@@ -707,6 +866,10 @@ def worker(conn, addr):
 
                                         safe_insert(f"Command received-> {cadena} part: {name_piece}\nCommand PASSED\n", "green")
                                         logging.info(f"Command received-> {cadena} part: {name_piece} - Command PASSED")
+
+                                        # ========== PROCESO EXITOSO ==========
+                                        safe_insert(f'''✅✅✅ ALL VALIDATIONS PASSED ✅✅✅\n📡 Calling Parentage API for: {name_piece}\nParentage API response for {name_piece}: {json.dumps(data_parentage_json, indent=4)}\n
+Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Number: {serial_number_parentage}\nInterlocking JSON: {json.dumps(interlocking_json_api, indent=4)}\nResponse: {json.dumps(data_interlocking, indent=4)}\nConduit JSON: {json.dumps(conduit_json_api, indent=4)}\nCONDUIT Response: {json.dumps(conduit_response, indent=2)}\nCommand received-> {cadena} part: {name_piece}\nCommand PASSED\n''', "green")
 
                                         green_label.configure(image=image_green_full)
                                         red_label.configure(image=image_red)
@@ -765,19 +928,253 @@ def worker(conn, addr):
                             green_label.configure(image=image_green_full)
                             red_label.configure(image=image_red)
 
+                            # Obtener URLs
+                            url_data = conexion.obtener_url_api()
+                            url_shop_order = url_data[0][0]      # Shop Order API
+                            url_parentage = url_data[1][0]      # Parentage API
+                            url_api_unit = url_data[2][0]       # Unit API
+                            url_interlocking = url_data[3][0]   # Interlocking API
+                            url_conduit = url_data[4][0]        # Conduit API
+
                             name_piece =option[1]
 
                             if len(name_piece) > 27:
-                                piece = name_piece + ", PASSED"
+                                conn.settimeout(None)
 
+                                # ========== INVOKE API PARENTAGE ==========
+                                safe_insert(f"📡 Calling Parentage API for: {name_piece}", "blue")
+                                        
+                                url_parentage_completa = url_parentage.replace("serialnumber", name_piece)
+                                response_parentage = requests.get(url_parentage_completa, timeout=30)
+                                        
+                                if response_parentage.status_code != 200:
+                                    logging.error(f"Parentage API failed: {response_parentage.status_code}")
+                                    safe_insert(f"❌ Parentage API failed - Status: {response_parentage.status_code}", "red")
+                                    conn.send("FAILED".encode('UTF-8'))
+                                    break
+
+                                # Procesar respuesta de Parentage
+                                data_parentage_json = response_parentage.json()
+                                data_parentage = data_parentage_json.get("data", {})
+
+                                logging.info(f"Parentage API response for {name_piece}: {json.dumps(data_parentage_json, indent=4)}")
+                                logging.info(f"Extracted from Parentage API - Part Number: {data_parentage}")
+
+                                # Si en la sección de datos no viene nada o viene una lista vacía, intentar con Unit API
+                                if not data_parentage or (isinstance(data_parentage, list) and not data_parentage):
+                                    logging.warning("Datos de parentage vacíos o no existentes")
+                                    safe_insert("⚠️ Parentage API returned empty data", "yellow")
+                                            
+                                    # ========== INVOKE API UNIT ==========
+                                    safe_insert(f"📡 Calling Unit API for piece: {name_piece}", "blue")
+                                    url_api_unit_completa = url_api_unit.replace("serialnumber", name_piece)
+                                    response_unit = requests.get(url_api_unit_completa, timeout=30)
+
+                                    if response_unit.status_code != 200:
+                                        logging.error(f"Unit API failed for {name_piece}: {response_unit.status_code}")
+                                        safe_insert(f"❌ Unit API failed for piece {name_piece}", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        break
+                                            
+                                    data_unit = response_unit.json()
+                                    data_unit = data_unit.get("data", {})
+                                    unit_part_number = data_unit.get("part_number", "")
+                                    unit_serial_number = data_unit.get("serial_number", "")
+
+                                    logging.info(f"Unit API response for {name_piece}: {json.dumps(data_unit, indent=4)}")
+                                    logging.info(f"Extracted from Unit API - Part Number: {unit_part_number}, Serial Number: {unit_serial_number}")
+                                            
+                                    registros_reales = procesar_registros.verificar_archivos()
+                                            
+                                    configurador = conexion.configurador()
+                                    sop_order = configurador[8]
+                                    qty_sp_order = configurador[5]
+                                    if registros_reales == "EMPTY_FILE":
+                                        exito, nombre, cantidad = shopo_order_api.consultar_api_y_guardar(url_shop_order, sop_order, qty_sp_order)
+                                        sop_part_number, sop_serial_number, sop_process_name = leer_shop_order.leer_archivo_generado()
+                                    elif registros_reales == "EMPTY_DATA":
+                                        exito, nombre, cantidad = shopo_order_api.consultar_api_y_guardar(url_shop_order, sop_order, qty_sp_order)
+                                        sop_part_number, sop_serial_number, sop_process_name = leer_shop_order.leer_archivo_generado()
+                                    else:
+                                        sop_part_number, sop_serial_number, sop_process_name = leer_shop_order.leer_archivo_generado()
+                                            
+                                    UNIT_PART_NUMBER = unit_part_number
+                                    UNIT_SERIAL_NUMBER = unit_serial_number
+
+                                    SHOP_ORDER_PART_NUMBER = sop_part_number
+                                    SHOP_ORDER_SERIAL_NUMBER = sop_serial_number
+                                            
+                                    # ========== INVOKE API INTERLOCKING ==========
+                                    safe_insert(f"\n🔗 Calling Interlocking API...", "blue")
+                                    safe_insert(f"   📤 Sending parameters:", "blue")
+                                    safe_insert(f"      - Serial Parent: {SHOP_ORDER_SERIAL_NUMBER}", "blue")
+                                    safe_insert(f"      - Part Number Parent: {SHOP_ORDER_PART_NUMBER}", "blue")
+                                    safe_insert(f"      - Heatsink_pn (unique): {UNIT_PART_NUMBER}", "blue")
+                                            
+                                    interlocking_json_api = interlocking_json.interlocking_station_40_empty_data(
+                                        SHOP_ORDER_SERIAL_NUMBER,
+                                        SHOP_ORDER_PART_NUMBER,
+                                        UNIT_PART_NUMBER
+                                    )
+
+                                    logging.info(f"Interlocking JSON: {json.dumps(interlocking_json_api, indent=4)}")
+                                            
+                                    response_interlocking = requests.post(
+                                        url_interlocking,
+                                        json=interlocking_json_api,
+                                        timeout=30
+                                    )
+
+                                    if response_interlocking.status_code != 200:
+                                        logging.error(f"Interlocking failed: {response_interlocking.json()}")
+                                        safe_insert(f"❌ Interlocking API failed: {response_interlocking.json()}", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        break
+
+                                    data_interlocking = response_interlocking.json()
+
+                                    if not data_interlocking.get("success", False):
+                                        error_msg = data_interlocking.get("message", "Unknown error")
+                                        logging.error(f"Interlocking denied: {error_msg}")
+                                        safe_insert(f"❌ Interlocking API Denied: {error_msg}", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        break
+
+                                    conduit_json_api = conduit_json.conduit_st40(
+                                        SHOP_ORDER_SERIAL_NUMBER
+                                    )
+                                    logging.info(f"Conduit JSON: {json.dumps(conduit_json_api, indent=4)}")
+
+                                    try:
+                                        response_conduit = requests.post(url_conduit, json=conduit_json_api, timeout=30)
+
+                                        if response_conduit.status_code == 200:
+                                            conduit_response = response_conduit.json()
+                                            logging.info(f"CONDUIT Response: {json.dumps(conduit_response, indent=2)}")
+                                                
+                                        else:
+                                            logging.warning(f"⚠️ CONDUIT API error: Status {response_conduit.status_code}")
+                                            safe_insert(f"[{addr}] ❌ ⚠️ CONDUIT API error: Status {response_conduit.status_code}", "red")
+                                            conn.send("FAILED".encode('UTF-8'))
+                                            break
+                                    except requests.exceptions.RequestException as e:
+                                        logging.error(f"[{addr}] ❌ Error de conexión con API Conduit: {str(e)}")
+                                        safe_insert(f"[{addr}] ❌ Error de conexión con API Conduit: {str(e)}", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        break
+
+                                    # ========== PROCESO EXITOSO ==========
+                                    safe_insert(f'''✅✅✅ ALL VALIDATIONS PASSED ✅✅✅\n⚠️ Parentage API returned empty data\n📡 Calling Unit API for piece: {name_piece}\nUnit API response for {name_piece}: {json.dumps(data_unit, indent=4)}\n
+Extracted from Unit API - Part Number: {unit_part_number}, Serial Number: {unit_serial_number}\nInterlocking JSON: {json.dumps(interlocking_json_api, indent=4)}\nResponse: {json.dumps(data_interlocking, indent=4)}\nConduit JSON: {json.dumps(conduit_json_api, indent=4)}\nCONDUIT Response: {json.dumps(conduit_response, indent=2)}''', "green")
+                                            
+                                    conexion.piece_store(name_piece)
+                                    piece = name_piece + ", PASSED"
+                                    entry_piece.configure(state="readonly", textvariable=piece_name)
+                                    piece_name.set(name_piece)
+
+                                    conn.send(piece.encode('UTF-8'))
+
+                                    BANDERA = 1
+                                    break
+                                        
+                                if isinstance(data_parentage, list) and data_parentage:
+                                    data_parentage = data_parentage[0]
+                                        
+                                part_number_parentage = data_parentage.get("parent_part_number", "")
+                                serial_number_parentage = data_parentage.get("serial_number", "")
+
+                                logging.info(f"Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Number: {serial_number_parentage}")
+
+                                registros_reales = procesar_registros.verificar_archivos()
+                                            
+                                configurador = conexion.configurador()
+                                sop_order = configurador[8]
+                                qty_sp_order = configurador[5]
+                                if registros_reales == "EMPTY_FILE":
+                                    exito, nombre, cantidad = shopo_order_api.consultar_api_y_guardar(url_shop_order, sop_order, qty_sp_order)
+                                    sop_part_number, sop_serial_number, sop_process_name = leer_shop_order.leer_archivo_generado()
+                                elif registros_reales == "EMPTY_DATA":
+                                    exito, nombre, cantidad = shopo_order_api.consultar_api_y_guardar(url_shop_order, sop_order, qty_sp_order)
+                                    sop_part_number, sop_serial_number, sop_process_name = leer_shop_order.leer_archivo_generado()
+                                else:
+                                    sop_part_number, sop_serial_number, sop_process_name = leer_shop_order.leer_archivo_generado()
+                                        
+                                SHOP_ORDER_SERIAL_NUMBER = sop_serial_number
+
+                                PARENT_PART_NUMBER, PARENT_SERIAL_NUMBER = part_number_parentage, serial_number_parentage
+
+                                # ========== INVOKE API INTERLOCKING ==========
+                                safe_insert(f"\n🔗 Calling Interlocking API...", "blue")
+                                safe_insert(f"   📤 Sending parameters:", "blue")
+                                safe_insert(f"      - Serial Parent: {PARENT_SERIAL_NUMBER}", "blue")
+                                safe_insert(f"      - Part Number Parent: {PARENT_PART_NUMBER}", "blue")
+                                safe_insert(f"      - Heatsink_pn (unique): {SHOP_ORDER_SERIAL_NUMBER}", "blue")
+                                            
+                                interlocking_json_api = interlocking_json.interlocking_station_40(
+                                    SHOP_ORDER_SERIAL_NUMBER,
+                                    PARENT_PART_NUMBER
+                                )
+
+                                logging.info(f"Interlocking JSON: {json.dumps(interlocking_json_api, indent=4)}")
+                                        
+                                response_interlocking = requests.post(
+                                    url_interlocking,
+                                    json=interlocking_json_api,
+                                    timeout=30
+                                )
+
+                                if response_interlocking.status_code != 200:
+                                    logging.error(f"Interlocking failed: {response_interlocking.json()}")
+                                    safe_insert(f"❌ Interlocking API failed: {response_interlocking.json()}", "red")
+                                    conn.send("FAILED".encode('UTF-8'))
+                                    break
+
+                                data_interlocking = response_interlocking.json()
+
+                                if not data_interlocking.get("success", False):
+                                    error_msg = data_interlocking.get("message", "Unknown error")
+                                    logging.error(f"Interlocking denied: {error_msg}")
+                                    safe_insert(f"❌ Interlocking API Denied: {error_msg}", "red")
+                                    conn.send("FAILED".encode('UTF-8'))
+                                    break
+
+                                conduit_json_api = conduit_json.conduit_st40(
+                                    PARENT_SERIAL_NUMBER
+                                )
+                                logging.info(f"Conduit JSON: {json.dumps(conduit_json_api, indent=4)}")
+
+                                try:
+                                    response_conduit = requests.post(url_conduit, json=conduit_json_api, timeout=30)
+
+                                    if response_conduit.status_code == 200:
+                                        conduit_response = response_conduit.json()
+                                        logging.info(f"CONDUIT Response: {json.dumps(conduit_response, indent=2)}")
+                                                
+                                    else:
+                                        logging.warning(f"⚠️ CONDUIT API error: Status {response_conduit.status_code}")
+                                        safe_insert(f"[{addr}] ❌ ⚠️ CONDUIT API error: Status {response_conduit.status_code}", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        break
+                                except requests.exceptions.RequestException as e:
+                                    logging.error(f"[{addr}] ❌ Error de conexión con API Conduit: {str(e)}")
+                                    safe_insert(f"[{addr}] ❌ Error de conexión con API Conduit: {str(e)}", "red")
+                                    conn.send("FAILED".encode('UTF-8'))
+                                    break
+
+                                piece = name_piece + ", PASSED"
+                                # try:
+                                #     conn.send(piece.encode('UTF-8'))
+                                # except Exception as e:
+                                #     safe_insert(f"Error enviando: {e}", "red")
                                 entry_piece.configure(state="readonly", textvariable=piece_name)
                                 piece_name.set(name_piece)
 
                                 conn.send(piece.encode('UTF-8'))
-                                
+
                                 # Almacenar la pieza en la base de datos
                                 conexion.piece_store(name_piece)
-                                                    
+
+                                BANDERA = 2          
                                 # Registrar en bitácora
                                 conexionBitacora.event(
                                 "SPP-001",
@@ -796,9 +1193,15 @@ def worker(conn, addr):
                                 safe_insert(f"Command received-> {cadena} part: {name_piece}\nCommand PASSED\n", "green")
                                 logging.info(f"Command received-> {cadena} part: {name_piece} - Command PASSED")
 
+                                # ========== PROCESO EXITOSO ==========
+                                safe_insert(f'''✅✅✅ ALL VALIDATIONS PASSED ✅✅✅\n📡 Calling Parentage API for: {name_piece}\nParentage API response for {name_piece}: {json.dumps(data_parentage_json, indent=4)}\n
+Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Number: {serial_number_parentage}\nInterlocking JSON: {json.dumps(interlocking_json_api, indent=4)}\nResponse: {json.dumps(data_interlocking, indent=4)}\nConduit JSON: {json.dumps(conduit_json_api, indent=4)}\nCONDUIT Response: {json.dumps(conduit_response, indent=2)}\nCommand received-> {cadena} part: {name_piece}\nCommand PASSED\n''', "green")
+
                                 green_label.configure(image=image_green_full)
                                 red_label.configure(image=image_red)
                                 pieza = name_piece
+
+                                break
 
                             else:
                                 conn.settimeout(None)
@@ -913,119 +1316,21 @@ def worker(conn, addr):
                             if duration == "PASSED":
                                 # entry_piece.configure(state="readonly", textvariable=piece_name)
                                 # piece_name.set("")
+                                if BANDERA == 1:
+                                    SHOP_ORDER_SERIAL_NUMBER
+                                    SHOP_ORDER_PART_NUMBER
+                                    UNIT_PART_NUMBER
                                 safe_insert("Command received-> "+cadena+"\n"+"Command END PROCESS PASSED"+"\n")
                                 try:
                                     conn.send("PASSED".encode('UTF-8'))
                                 except Exception as e:
                                     safe_insert(f"Error enviando: {e}", "red")
 
-
-                                # Obtener formatos habilitados
-                                enabled_formats = conexion.get_enabled_export_formats()
-                                # safe_insert(f"Supported formats: {', '.join(enabled_formats) if enabled_formats else 'None'}\n")
-
-                                # Variables para resultados
-                                json_result = None
-                                csv_result = None
-                                xml_result = None
-                                any_file_created = False
-                                errors = []
-
-                                # Generar archivos según formatos habilitados
-                                if 'JSON' in enabled_formats:
-                                    print("Generating JSON file...")
-                                    try:
-                                        file_json = data_json.json_file(option[4])
-                                        json_result = file_json
-                                        if file_json == "PASSED":
-                                            any_file_created = True
-                                            # safe_insert("✓ JSON file successfully generated\n")
-                                        else:
-                                            errors.append(f"JSON: {file_json}")
-                                            safe_insert(f"✗ JSON Error: {file_json}\n", "red")
-                                    except Exception as e:
-                                        errors.append(f"JSON: {str(e)}")
-                                        print(errors)
-                                        safe_insert(f"✗ JSON Exception: {str(e)}\n", "red")
-                                    
-                                if 'CSV' in enabled_formats:
-                                    try:
-                                        # Importar aquí para evitar dependencia si no está habilitado
-                                        import data_csv_60
-                                        file_csv = data_csv_60.csv_file()
-                                        csv_result = file_csv
-                                        if file_csv == "PASSED":
-                                            any_file_created = True
-                                            # safe_insert("✓ CSV file successfully generated\n")
-                                        else:
-                                            errors.append(f"CSV: {file_csv}")
-                                            safe_insert(f"✗ CSV Error: {file_csv}\n", "red")
-                                    except ImportError:
-                                        errors.append("CSV: Módulo no encontrado")
-                                        safe_insert("✗ CSV module not available\n", "red")
-                                    except Exception as e:
-                                        errors.append(f"CSV: {str(e)}")
-                                        safe_insert(f"✗ CSV Exception: {str(e)}\n", "red")
-                                    
-                                if 'XML' in enabled_formats:
-                                    try:
-                                        # Importar aquí para evitar dependencia si no está habilitado
-                                        import data_xml
-                                        file_xml = data_xml.xml_file()
-                                        xml_result = file_xml
-                                        if file_xml == "PASSED":
-                                            any_file_created = True
-                                            # safe_insert("✓ XML file successfully generated\n")
-                                        else:
-                                            errors.append(f"XML: {file_xml}")
-                                            safe_insert(f"✗ XML Error: {file_xml}\n", "red")
-                                    except ImportError:
-                                        errors.append("XML: Módulo no encontrado")
-                                        safe_insert("✗ XML module not available\n", "red")
-                                    except Exception as e:
-                                        errors.append(f"XML: {str(e)}")
-                                        safe_insert(f"✗ XML Exception: {str(e)}\n", "red")
-                                    
-                                # Verificar resultados
-                                if not enabled_formats:
-                                    safe_insert("⚠ No export formats enabled\n", "orange")
-                                    conexionBitacora.event("ENDP-003", "|No export formats enabled|", month, day)
-                                    conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
-                                    green_label.configure(image=image_green_full)
-                                    red_label.configure(image=image_red)
-                                    
-                                elif errors:
-                                    # Hubo errores en algunos formatos
-                                    error_message = "; ".join(errors)
-                                    safe_insert(f"⚠ Some files were not generated: {error_message}\n", "orange")
-                                    
-                                    if any_file_created:
-                                        # Al menos un archivo se creó exitosamente
-                                        safe_insert("✓ At least one file was successfully generated\n")
-                                        conexionBitacora.event("ENDP-004", f"|Partial export| {error_message}", month, day)
-                                        conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
-                                        green_label.configure(image=image_green_full)
-                                        red_label.configure(image=image_red)
-                                    else:
-                                        # Ningún archivo se creó
-                                        safe_insert("✗ No file could be generated\n", "red")
-                                        try:
-                                            conn.send("FAILED".encode('UTF-8'))
-                                        except Exception as e:
-                                            safe_insert(f"Error enviando: {e}", "red")
-                                            
-                                        conexionBitacora.event("ENDP-002", f"|No files created| {error_message}", month, day)
-                                        conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
-                                        green_label.configure(image=image_green)
-                                        red_label.configure(image=image_red_full)
+                                try:
+                                    print(f"bandera: {BANDERA}")
+                                except:
+                                    print("Error")
                                 
-                                else:
-                                    # Todos los formatos habilitados se generaron exitosamente
-                                    # safe_insert("✓ All files were successfully generated\n")
-                                    conexionBitacora.event("ENDP-001", "|Command received| " + cadena, month, day)
-                                    conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
-                                    green_label.configure(image=image_green_full)
-                                    red_label.configure(image=image_red)
                                         
                             else:
                                 try:
