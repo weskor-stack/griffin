@@ -44,4 +44,48 @@ def conduit_st20(parent_serial_number):
     # print(json.dumps(conduit_json, indent=4))
     return conduit_json
 
-# conduit_st20("P1135558-04-A:SANN26097000001")
+def conduit_st40(serial_number):
+    configurador     = conexion.configurador()
+
+    workstation_id = configurador[3]          # station  → worStation_ID
+    operator_id    = configurador[2]          # operator → Operator_ID
+    client_id      = configurador[6]          # cliente → cliente_ID
+    location       = configurador[11]
+    sf_id          = configurador[12]
+    password       = configurador[7]
+    print_macro    = configurador[10] 
+
+    commands = []
+
+    commands.append({
+        "command": print_macro
+    })
+    
+    conduit_json = {
+        "version":      "1.0",
+        "keep_alive":   False,
+        "refresh_unit": True,
+        "source": {
+            "workstation": {
+                "station": location,
+                "type":    "location"
+            },
+            "client_id": sf_id,
+            "employee":  operator_id,
+            "password":  password
+        },
+        "transactions": [
+            {
+                "unit": {
+                    "unit_id": serial_number
+                },
+                "commands": commands
+            }
+        ]
+    }
+    # print(json.dumps(conduit_json, indent=4))
+    return conduit_json
+
+
+
+# conduit_st40("P1135558-04-A:SANN26097000001")

@@ -130,5 +130,89 @@ def interlocking_station_50_80(parent_serial_number, parent_part_number, compone
     # print(json.dumps(interlocking_st50_80, indent=4))
     return interlocking_st50_80
 
+def interlocking_station_40_empty_data(shop_serial_number, shop_part_number, heatsink_pn):
+    unit_information = []
+    configurador = conexion.configurador()
+    machine_name = configurador[0]
+    client_id = configurador[6]
+    id_operator = configurador[2]
+    password = configurador[7]
+    model_id = configurador[9]
+    process_name = configurador[1]
+    print_macro = configurador[10]
+    location = configurador[11]
+    shop_flor = configurador[12]
+
+    programas = conexion.select_programs()
+
+    unit_information.append({
+        "name": "station_id",
+        "value": machine_name
+    })
+    unit_information.append({
+        "name": "model_id",
+        "value": model_id
+    })
+
+    unit_information.append({
+        "name": "heatsink_partnumber",
+        "value": heatsink_pn
+    })
+
+    interlocking_station_40_empty_data = {
+        "serial": shop_serial_number,
+        "product": shop_part_number,
+        "station": machine_name,
+        "operator": id_operator,
+        "process_name": process_name,
+        "location": "",
+        "test_steps": {
+            "unit_information": unit_information
+        }
+        
+    }
+    # print(json.dumps(interlocking_station_40_empty_data, indent=4))
+    return interlocking_station_40_empty_data
+
+def interlocking_station_40(serial_number, part_number):
+    unit_information = []
+    configurador = conexion.configurador()
+    machine_name = configurador[0]
+    client_id = configurador[6]
+    id_operator = configurador[2]
+    password = configurador[7]
+    model_id = configurador[9]
+    process_name = configurador[1]
+    print_macro = configurador[10]
+    location = configurador[11]
+    shop_flor = configurador[12]
+
+    programas = conexion.select_programs()
+
+    unit_information.append({
+        "name": "station_id",
+        "value": machine_name
+    })
+    unit_information.append({
+        "name": "program_id",
+        "value": model_id
+    })
+
+    interlocking_station_40 = {
+        "serial": serial_number,
+        "product": part_number,
+        "station": machine_name,
+        "operator": id_operator,
+        "process_name": process_name,
+        "location": "",
+        "test_steps": {
+            "unit_information": unit_information
+        }
+        
+    }
+    # print(json.dumps(interlocking_station_40, indent=4))
+    return interlocking_station_40
 # interlocking_station_20("AABB-parent_serial_number","CCGG02-parent_part_number","ZZXX01-heater_part_number")
 # interlocking_station_50_80("MODEL1-001-0000015", "2102110-00-C", "COMPONENT-1")
+# interlocking_station_40_empty_data("MODEL1-001-0000015", "2102110-00-C", "HEATSINK-1")
+# interlocking_station_40("MODEL1-001-0000015", "HS-2026")

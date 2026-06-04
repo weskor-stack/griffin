@@ -5,7 +5,10 @@ __version__ = "v2.0.0"
 
 # maria DB
 import conexion
-
+import logging
+import conduit_json
+import json
+import requests
 
 pressfit = "commit,Pressfit,F,270.00,70.00,174.35,Numeric,N,PASSED,,,D,0.1,5.0,0.50,Numeric,mms,PASSED,,,PIN1,,,,,,,,,PIN2,,,,,,,,,PIN3,,,,,,,,,PIN4,,,,,,,,,P2170217-00-E:SE4A26120000117,1/"
 screwing = "commit,Screwing,T,1.25,1,1.8,Numeric,N,PASSED,Comentario,A,31250,2900,3500,Numeric,degrees,FAILED,Comentario,PX,50,47,55,Numeric,mm,PASSED,Comentario,PY,150,140,160,Numeric,mm,PASSED,Comentario,4,P2173404-00-C:SEYU26061A0765,1/"
@@ -31,7 +34,7 @@ cadenas = temperatura.split(',')
 # print(len(cadenas))
 name = "P2173404-00-C:SEYU26061A0765"
 
-def commit(cadena, name_piece):
+def commit(cadena, name_piece, conduit_data):
     options = cadena.split(',')
     data_for_table = []
     # print(cadena)
@@ -296,7 +299,26 @@ def commit(cadena, name_piece):
                         if measurement[6] =='PASSED':
                             result_m = "PASS"
                         else:
+                            url_data = conexion.obtener_url_api()
+                            url_conduit = url_data[4][0]
                             result_m = "FAIL"
+                            conduit_json_api = conduit_json.conduit_st40(
+                                conduit_data
+                            )
+                            logging.info(f"Conduit JSON: {json.dumps(conduit_json_api, indent=4)}")
+                            try:
+                                response_conduit = requests.post(url_conduit, json=conduit_json_api, timeout=30)
+
+                                if response_conduit.status_code == 200:
+                                    conduit_response = response_conduit.json()
+                                    logging.info(f"CONDUIT Response: {json.dumps(conduit_response, indent=2)}")
+                                    print(f"CONDUIT Response: {json.dumps(conduit_response, indent=2)}")
+                                else:
+                                    logging.warning(f"⚠️ CONDUIT API error: Status {response_conduit.status_code}")
+                                    print(f"⚠️ CONDUIT API error: Status {response_conduit.status_code}")
+                            except requests.exceptions.RequestException as e:
+                                logging.error(f"❌ Error de conexión con API Conduit: {str(e)}")
+                                
                         
                         if position_x[6] =='PASSED':
                             result_ipx = "PASS"
