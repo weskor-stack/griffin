@@ -112,6 +112,20 @@ def keep_alive_database():
         except:
             pass
     
+    try:
+        # Ejecutar una consulta simple cada 5 minutos
+        with conexionBitacora.conn.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        logging.debug("Keep-alive ejecutado")
+    except Exception as e:
+        logging.warning(f"Keep-alive falló: {e}")
+        # Intentar reconectar
+        try:
+            conexionBitacora.db_manager._connect()
+        except:
+            pass
+        
     # Programar próximo keep-alive (5 minutos)
     root.after(300000, keep_alive_database)
 

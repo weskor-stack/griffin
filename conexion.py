@@ -1311,6 +1311,24 @@ def component_data(part_id):
         # print(f"[ERROR] electrical_data(): {e}")
         return []
     
+
+def weight_data(part_id):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    weight_name,
+                    description
+                FROM weight
+                WHERE part_id = %s
+                ORDER BY weight_id ASC
+            ''', (part_id,))
+            # print(cursor.fetchall())
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] electrical_data(): {e}")
+        return []
+    
 ############################################# Archivos por prueba ##################################################
 
 def screwing_data3(part_id, limite):
@@ -3585,7 +3603,40 @@ def insert_configurador_st100(machine_id, client_id, operator, password, model_i
         if conn: conn.rollback()
         raise Exception(f"Fallo al insertar configuración inicial ST100: {e}")
 
+########################################################## REGISTRO DE PESO ####################################################
+def weight_store(weight_name,descripcion,parte):
+    try:
+        # --- Obtener part activo ---
+        cursor = conn.cursor()
+        cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 3 AND part_number = %s ORDER BY part_id DESC LIMIT 1",(parte,))
+        part = cursor.fetchone()
+        cursor.close()
 
+        if not part:
+            # print("[ERROR] No se encontró una pieza activa.")
+            return "FAILED"
+
+        part_id = part[0]
+
+        # --- Insertar peso ---
+        cursor = conn.cursor()
+        sql = """
+            INSERT INTO weight (part_id, weight_name, description)
+            VALUES (?, ?, ?)
+        """
+        cursor.execute(sql, (part_id, weight_name, descripcion))
+        conn.commit()
+        cursor.close()
+
+        return "PASSED"
+
+    except mariadb.Error as e:
+        # print(f"[DB ERROR] weight_store(): {e}")
+        return "FAILED"
+    except Exception as e:
+        # print(f"[ERROR] weight_store(): {e}")
+        return "FAILED"
+    
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
 # parameters_electrical(['Ct', '50', '10', '100', 'Numeric', 'N', 'OK', 'Comentarios'],name)
