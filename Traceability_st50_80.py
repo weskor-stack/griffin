@@ -1060,7 +1060,7 @@ def worker(conn, addr):
                                         PART_NUMBER,
                                         COMPONENT,
                                         component_sn,       
-                                        "PLC_DEFAULT_001"
+                                        ""
                                     )
 
                                     response_traceability = requests.post(
