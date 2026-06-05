@@ -65,11 +65,9 @@ def traceability_station_20(serial_number,parent_serial_number, parent_part_numb
             test_name = x[name_idx]
             
             defect_code_value = x[defect_code_idx] if defect_code_idx is not None else ""
-            
-            # codigo_defecto = evaluar_codigo_defecto(val, low, high, plc_defect_code, test_name, atributos_db)
 
             test_steps_array.append({
-                "name": test_name,                           
+                "name": test_name,                                           
                 "description": x[desc_idx] if desc_idx is not None else test_name, 
                 "comparator": "GELE",
                 "lowLimit": low,
@@ -135,7 +133,7 @@ def traceability_station_20(serial_number,parent_serial_number, parent_part_numb
 
     return estructura_json
 
-def traceability_station_50_80(task_duration, serial_padre, part_number_padre, component_serial, component_part_number, defect_code_default):
+def traceability_station_50_80(task_duration, serial_padre, part_number_padre, component_serial, component_part_number, defect_code_default=""):
     config_local = conexion.configuradorst50_80()
     
     if config_local and config_local != "FAILED" and len(config_local) >= 6:
@@ -153,6 +151,17 @@ def traceability_station_50_80(task_duration, serial_padre, part_number_padre, c
 
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     
+    atributos = conexion.select_attributes_st50_80()
+    atributos_map = {}
+    for attr in atributos:
+        if len(attr) >= 7:
+            nombre_atributo = str(attr[1]).lower().strip() 
+            atributos_map[nombre_atributo] = {
+                'defect_code_low': str(attr[5]).strip() if attr[5] is not None else "",   
+                'defect_code_high': str(attr[6]).strip() if attr[6] is not None else "",  
+                'name': attr[1]
+            }
+
     part_row = conexion.pieces(serial_padre)
     all_test_rows = []
     
@@ -161,22 +170,26 @@ def traceability_station_50_80(task_duration, serial_padre, part_number_padre, c
         
         try:
             sr = conexion.screwing_data(part_id)
-            if sr and isinstance(sr, list): all_test_rows.extend(sr)
+            if sr and isinstance(sr, list):
+                for item in sr: all_test_rows.append(item + ('screwing',))
         except Exception: pass
         
         try:
             pr = conexion.pressfit_data(part_id)
-            if pr and isinstance(pr, list): all_test_rows.extend(pr)
+            if pr and isinstance(pr, list):
+                for item in pr: all_test_rows.append(item + ('pressfit',))
         except Exception: pass
         
         try:
             ir = conexion.inspection_data3(part_id)
-            if ir and isinstance(ir, list): all_test_rows.extend(ir)
+            if ir and isinstance(ir, list):
+                for item in ir: all_test_rows.append(item + ('inspection',))
         except Exception: pass
         
         try:
             er = conexion.electrical_data(part_id)
-            if er and isinstance(er, list): all_test_rows.extend(er)
+            if er and isinstance(er, list):
+                for item in er: all_test_rows.append(item + ('electrical',))
         except Exception: pass
 
     steps_list = []
@@ -184,21 +197,55 @@ def traceability_station_50_80(task_duration, serial_padre, part_number_padre, c
 
     for row in all_test_rows:
         try:
-            val_medido = str(row[1]) if row[1] is not None else "0.0"
+            test_source = str(row[-1]).strip().lower() if isinstance(row[-1], str) and row[-1] in ['screwing', 'pressfit', 'inspection', 'electrical'] else ""
+            
+            val_medido = float(row[1]) if row[1] is not None else 0.0
             lim_inf = float(row[2]) if row[2] is not None else 0.0
             lim_sup = float(row[3]) if row[3] is not None else 0.0
             unidad = str(row[5]) if row[5] is not None else ""
             status_step = str(row[6]).upper() if row[6] is not None else "PASSED"
-            name_step = str(row[11]) if row[11] is not None else "Measurement"
-            desc_step = str(row[10]) if row[10] is not None else "Description"
+            
+            if test_source == 'inspection':
+                name_step = str(row[7]).strip() if row[7] is not None else "Inspection_Step"
+            else:
+                name_step = str(row[11]).strip() if row[11] is not None else "Measurement"
+                
+            desc_step = name_step
+            
         except Exception:
             continue
 
         if status_step == "FAILED":
             global_status = "FAILED"
-            step_defect = defect_code_default if defect_code_default else "PLC_DEFAULT_001"
+            
+            defect_code_low = defect_code_default
+            defect_code_high = defect_code_default
+            
+            source_to_attribute = {
+                'screwing': 'SCREWING',
+                'pressfit': 'PRESSFIT', 
+                'inspection': 'INSPECTION',  
+                'electrical': 'ELECTRICAL'
+            }
+            
+            attr_name = source_to_attribute.get(test_source, name_step.upper())
+            
+            if attr_name.lower() in atributos_map:
+                defect_code_low = atributos_map[attr_name.lower()]['defect_code_low']
+                defect_code_high = atributos_map[attr_name.lower()]['defect_code_high']
+            else:
+                if name_step.lower() in atributos_map:
+                    defect_code_low = atributos_map[name_step.lower()]['defect_code_low']
+                    defect_code_high = atributos_map[name_step.lower()]['defect_code_high']
+            
+            if val_medido < lim_inf:
+                step_defect = defect_code_low if defect_code_low else defect_code_default
+            elif val_medido > lim_sup:
+                step_defect = defect_code_high if defect_code_high else defect_code_default
+            else:
+                step_defect = defect_code_high if defect_code_high else (defect_code_low if defect_code_low else defect_code_default)
         else:
-            step_defect = "NONE"
+            step_defect = ""
 
         steps_list.append({
             "name": name_step,
@@ -240,7 +287,7 @@ def traceability_station_50_80(task_duration, serial_padre, part_number_padre, c
             {
                 "command": "ReplaceTrackedComponent",
                 "ref_designator": f"{process_name}_{component_name_db}",
-                "component_id": component_part_number
+                "component_id": component_serial 
             }
         ]
     }
@@ -269,13 +316,12 @@ def traceability_station_40(bandera, serial_padre, part_number_padre, component_
 
     atributos = conexion.select_attributes_st50_80()
     
-    # Crear un diccionario para mapear nombres de atributos con sus códigos de defecto
     atributos_map = {}
     for attr in atributos:
-        nombre_atributo = attr[1].lower()  # Normalizar a minúsculas para comparación
+        nombre_atributo = attr[1].lower()  
         atributos_map[nombre_atributo] = {
-            'defect_code_low': attr[5],   # defect_code para límite inferior
-            'defect_code_high': attr[6],  # defect_code_high para límite superior
+            'defect_code_low': attr[5],   
+            'defect_code_high': attr[6],  
             'name': attr[1],
             'unit': attr[2],
             'lower_limit': attr[3],
@@ -285,34 +331,28 @@ def traceability_station_40(bandera, serial_padre, part_number_padre, component_
     if part_row:
         part_id = part_row[0]
         
-        # También podemos agregar el nombre de la tabla de origen a cada registro
         try:
             sr = conexion.screwing_data(part_id)
             if sr and isinstance(sr, list):
-                # Agregar origen a cada tupla para identificar la prueba
-                for item in sr:
-                    all_test_rows.append(item + ('screwing',))
+                for item in sr: all_test_rows.append(item + ('screwing',))
         except Exception: pass
         
         try:
             pr = conexion.pressfit_data(part_id)
             if pr and isinstance(pr, list):
-                for item in pr:
-                    all_test_rows.append(item + ('pressfit',))
+                for item in pr: all_test_rows.append(item + ('pressfit',))
         except Exception: pass
         
         try:
             ir = conexion.inspection_data4(part_id)
             if ir and isinstance(ir, list):
-                for item in ir:
-                    all_test_rows.append(item + ('inspection',))
+                for item in ir: all_test_rows.append(item + ('inspection',))
         except Exception: pass
         
         try:
             er = conexion.electrical_data(part_id)
             if er and isinstance(er, list):
-                for item in er:
-                    all_test_rows.append(item + ('electrical',))
+                for item in er: all_test_rows.append(item + ('electrical',))
         except Exception: pass
 
     steps_list = []
@@ -327,7 +367,6 @@ def traceability_station_40(bandera, serial_padre, part_number_padre, component_
             status_step = str(row[6]).upper() if row[6] is not None else "PASSED"
             name_step = str(row[11]) if row[11] is not None else "Measurement"
             desc_step = str(row[11]) if row[11] is not None else "Description"
-            # Obtener el origen de la prueba (screwing, pressfit, inspection, electrical)
             test_source = str(row[12]) if len(row) > 12 else ""
         except Exception:
             continue
@@ -335,33 +374,26 @@ def traceability_station_40(bandera, serial_padre, part_number_padre, component_
         if status_step == "FAILED":
             global_status = "FAILED"
             
-            # Buscar el atributo según el nombre de la prueba
-            # Primero intentamos con el nombre exacto de la fuente
             defect_code_low = defect_code_default
             defect_code_high = defect_code_default
             
-            # Mapeamos el source con el nombre del atributo en la tabla attribute
-            # Ajusta estos nombres según los valores reales en tu tabla attribute
             source_to_attribute = {
                 'screwing': 'screwing',
                 'pressfit': 'pressfit', 
-                'inspection': 'inspection',  # o 'Inspction'
+                'inspection': 'inspection',  
                 'electrical': 'electrical'
             }
             
             attr_name = source_to_attribute.get(test_source, name_step.lower())
             
-            # Buscar en el mapa de atributos
             if attr_name in atributos_map:
                 defect_code_low = atributos_map[attr_name]['defect_code_low']
                 defect_code_high = atributos_map[attr_name]['defect_code_high']
             else:
-                # También intentar buscar por el nombre_step
                 if name_step.lower() in atributos_map:
                     defect_code_low = atributos_map[name_step.lower()]['defect_code_low']
                     defect_code_high = atributos_map[name_step.lower()]['defect_code_high']
             
-            # Asignar el defect_code según si falló por debajo o arriba del límite
             if val_medido < lim_inf:
                 step_defect = defect_code_low
             elif val_medido > lim_sup:
