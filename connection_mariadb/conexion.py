@@ -1,555 +1,3651 @@
+__author__ = "Edgar Bonilla Rivas"
+__copyright__ = "Copyright (C) 2025 Author Name"
+__license__ = "AUTOMATYCO"
+__version__ = "v2.0.0"
+
 # Module Imports
+from datetime import datetime
 import mariadb
 import sys
-
 from tkinter import  messagebox 
+import time
+import logging
+# import history_xlsx
 
-
-# Connect to MariaDB Platform
+# Configurar logging básico si no existe
 try:
-    conn = mariadb.connect(
+    logging.info("Inicializando módulo de conexión a BD")
+except:
+    logging.basicConfig(level=logging.INFO)
+
+class DatabaseManager:
+    """Gestor de conexión a BD con reconexión automática"""
+    
+    def __init__(self):
+        self.connection = None
+        self.config = {
+            "user": "root",
+            "password": "u8ch9Xn4Ol8woLw3E2A6",
+            "host": "127.0.0.1",
+            "port": 3306,
+            "database": "data_tracking_griffin",
+            "connect_timeout": 10,
+            "pool_name": "my_pool",
+            "pool_size": 3
+        }
+        self._connect()
+    
+    def _connect(self):
+        """Establece conexión inicial"""
+        try:
+            if self.connection:
+                try:
+                    self.connection.close()
+                except:
+                    pass
+            
+            self.connection = mariadb.connect(**self.config)
+            # Configurar auto-reconnect y timeouts más largos
+            cursor = self.connection.cursor()
+            cursor.execute("SET SESSION wait_timeout = 28800")  # 8 horas
+            cursor.execute("SET SESSION interactive_timeout = 28800")
+            cursor.execute("SET SESSION net_read_timeout = 300")
+            cursor.execute("SET SESSION net_write_timeout = 300")
+            cursor.close()
+            
+            logging.info("✅ Conexión a BD establecida correctamente")
+            print("✅ Conexión a BD establecida correctamente")
+            
+        except mariadb.Error as e:
+            logging.error(f"❌ Error conectando a BD: {e}")
+            print(f"❌ Error conectando a BD: {e}")
+            messagebox.showerror(
+                title="Error de Conexión", 
+                message="No se pudo conectar a la base de datos. Verifica que MariaDB esté ejecutándose."
+            )
+            sys.exit(1)
+    
+    def _ensure_connection(self):
+        """Verifica y reconecta si es necesario"""
+        try:
+            # Probar si la conexión está viva
+            if self.connection is None:
+                logging.warning("Conexión nula, reconectando...")
+                self._connect()
+                return
+            
+            self.connection.ping(reconnect=True)
+            
+        except (mariadb.Error, AttributeError) as e:
+            logging.warning(f"Conexión perdida: {e}. Reconectando...")
+            try:
+                self._connect()
+            except Exception as reconnect_error:
+                logging.error(f"Error al reconectar: {reconnect_error}")
+                raise
+    
+    def get_cursor(self):
+        """Obtiene un cursor válido (con reconexión automática)"""
+        self._ensure_connection()
+        return self.connection.cursor()
+    
+    def commit(self):
+        """Commit con verificación de conexión"""
+        self._ensure_connection()
+        self.connection.commit()
+    
+    def close(self):
+        """Cierra la conexión"""
+        if self.connection:
+            try:
+                self.connection.close()
+                logging.info("Conexión a BD cerrada")
+            except:
+                pass
+
+# Instancia global del gestor
+db_manager = DatabaseManager()
+
+def get_connection():
+    """Obtiene la conexión actual (con reconexión automática)"""
+    db_manager._ensure_connection()
+    return db_manager.connection
+
+# Mantener compatibilidad con código existente
+conn = db_manager.connection
+# Connect to MariaDB Platform
+# try:
+#     conn = mariadb.connect(
+#         user="root",
+#         password="u8ch9Xn4Ol8woLw3E2A6",
+#         host="127.0.0.1",
+#         port=3306,
+#         database="data_tracking_griffin")
+
+# except mariadb.Error as e:
+#     # print(f"Error connecting to MariaDB Platform: {e}")
+#     messagebox.showerror(title="Connection", message=f"Check database connection", )
+#     sys.exit(1)
+
+# # Get Cursor
+# # cur = conn.cursor()
+# def obtener_datos_fila_unica():
+#     try:
+#         cursor = conn.cursor()
+#         # Aquí pedimos explícitamente los 6 datos:
+#         cursor.execute("SELECT machine_id, process_name, operator, station, product, shop_order FROM configurador LIMIT 1")
+#         return cursor.fetchone()
+#     except Exception as e:
+#         print(f"Error: {e}")
+#         return None
+    
+# def insert_simple(machine, process, operator, station):
+#URLs
+def get_station():
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT station 
+            FROM configurador 
+            ORDER BY configurador_id DESC 
+            LIMIT 1
+        """)
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return row[0] if row else None
+    except mariadb.Error as e:
+        print(f"Error en get_station: {e}")
+        return None
+    
+def get_connection():
+    return mariadb.connect(
         user="root",
         password="u8ch9Xn4Ol8woLw3E2A6",
         host="127.0.0.1",
         port=3306,
-        database="data_tracking"
-
+        database="data_tracking_griffin"
     )
 
-    mycursor = conn.cursor()
-    mycursor.execute("SELECT status_name FROM status")
-    myresult = mycursor.fetchall()
-    # for x in myresult:
-    #     print(x[0])
-    
-    
-except mariadb.Error as e:
-    print(f"Error connecting to MariaDB Platform: {e}")
-    messagebox.showerror(title="Connection", message=f"Check database connection", )
-    sys.exit(1)
+def select_api_configs():
+    """
+    Lee de url_data. 
+    Columnas: [0]url_data_id [1]tc_id [2]name [3]url_data [4]user_id [5]create_registration
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT url_data_id, tc_id, name, url_data FROM url_data ORDER BY url_data_id ASC")
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    print(f"Registros DB: {rows}")  # debug — quítalo cuando funcione
+    return rows
 
-# Get Cursor
-cur = conn.cursor()
+def update_api_by_name(nombre, url):
+    """Actualiza la URL de un registro por su nombre."""
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE url_data SET url_data = ? WHERE name = ?",
+        (url, nombre)
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
+    
+# def insert_attribute(name, unit, upper, lower, value, create_registration):
+#     cursor = conn.cursor()
 
+#     sql = """
+#         INSERT INTO configurador
+#         (machine_id, process_name, operator, station, create_registration)
+#         VALUES (?, ?, ?, ?, ?)
+#     """
+#     cursor.execute(sql, (machine, process, operator, station, datetime.now()))
+#     conn.commit()
+#     cursor.close()
+
+def select_distinct(column):
+    cursor = conn.cursor()
+
+    query = f"""SELECT DISTINCT {column} FROM configurador
+    WHERE  {column} IS NOT NULL AND {column} != ''"""
+    cursor.execute(query)
+    data = [row[0] for row in cursor.fetchall()]
+    cursor.close()
+    return data
+
+    query = f"""SELECT DISTINCT {column} FROM configurador""" 
+    
+def select_configurador():
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT configurador_id, machine_id, process_name, operator, station
+        FROM configurador
+        ORDER BY configurador_id DESC
+        LIMIT 1
+    """)
+
+    data = cursor.fetchone()
+    cursor.close()
+    return data
+
+def obtener_url_api():
+    """Busca la URL en la tabla url_data"""
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT url_data FROM url_data")
+        #res = cursor.fetchone()
+        res = cursor.fetchall()
+        cursor.close()
+        return res
+    except:
+        return None
+
+def insert_attribute(name, unit, upper, lower, value, create_registration):
+    cursor = conn.cursor()
+    sql = """
+        INSERT INTO attribute 
+        (name, unit, upper_limit, lower_limit, value_expected, create_registration)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """
+
+    cursor.execute(sql, (name, unit, upper, lower, value, create_registration))
+    conn.commit()
+
+    attribute_id = cursor.lastrowid
+    cursor.close()
+
+    return attribute_id
+
+def insert_program(name, description, create_registration):
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO programs (name, description, create_registration) VALUES (%s, %s, %s)",
+        (name, description, create_registration)
+    )
+    conn.commit()
+    program_id = cursor.lastrowid
+    cursor.close()
+    return program_id
+
+def update_program(program_id, name, description):
+    cursor = conn.cursor()
+    sql = """
+        UPDATE programs
+        SET name = ?, description = ?
+        WHERE programs_id = ?
+    """
+    cursor.execute(sql, (name, description, program_id))
+    conn.commit()
+    cursor.close()  
+
+def delete_program(program_id):
+    cursor = conn.cursor()
+    sql = "DELETE FROM programs WHERE programs_id = ?"
+    cursor.execute(sql, (program_id,))
+    conn.commit()
+    cursor.close()
+
+def select_programs():
+    cursor = conn.cursor()
+    cursor.execute("SELECT programs_id, name, description FROM programs")
+    data = cursor.fetchall()
+    cursor.close()
+    return data
+
+#ATTRIBUTES
+
+def select_attributes():
+    cursor = conn.cursor()
+    cursor.execute("SELECT attribute_id, name, unit, upper_limit, lower_limit, value_expected, user_id, time, create_registration FROM attribute")
+    data = cursor.fetchall()
+    cursor.close()
+    return data
+
+def insert_attribute(name, unit, upper_limit, lower_limit, value_expected, time, create_registration):
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO attribute (name, unit, upper_limit, lower_limit, value_expected, time, create_registration) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+        (name, unit, upper_limit, lower_limit, value_expected, time, create_registration)
+    )
+    conn.commit()
+    attribute_id = cursor.lastrowid
+    cursor.close()
+    return attribute_id
+
+def update_attribute(attribute_id, name, unit, upper_limit, lower_limit,time, value_expected):
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "UPDATE attribute SET name=%s, unit=%s, upper_limit=%s, lower_limit=%s, time=%s, value_expected=%s WHERE attribute_id=%s",
+        (name, unit, upper_limit, lower_limit, time, value_expected, attribute_id)
+    )
+
+    conn.commit()
+    cursor.close()
+def delete_attribute(attribute_id):
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM attribute WHERE attribute_id=%s", (attribute_id,))
+    conn.commit()
+    cursor.close()
+    
+
+def select_type_test():
+    cursor = conn.cursor()
+    cursor.execute("SELECT test_type_id, name, status_id FROM test_type")
+    data = cursor.fetchall()
+    cursor.close()
+    return data
+
+def insert_type_test(name, status_id, user_id, create_registration):
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO test_type (name, status_id, user_id, create_registration) VALUES (%s, %s, %s, %s)",
+        (name, status_id, user_id, create_registration)
+    )
+    conn.commit()
+    test_type_id = cursor.lastrowid
+    cursor.close()
+    return test_type_id
+
+def update_type_test(test_type_id, name, status_id):
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE test_type SET name=%s, status_id=%s WHERE test_type_id=%s",
+        (name, status_id, test_type_id)
+    )
+    conn.commit()
+    cursor.close()
+    
 def server_connection():
-    server =[]
-    host = conn.cursor()
-    host.execute("SELECT server_port, server_ip_address FROM server")
-    host = host.fetchall()
-    for x in host:
-        server.append(x)
-        # print(x)
-
-    # print(server)
-    return server
-
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT server_port, server_ip_address FROM server")
+            servers = cursor.fetchall()
+        return servers
+    except Exception as e:
+        # print(f"[ERROR] server_connection(): {e}")
+        return []
+    
 def new_model(model):
     project = []
     models = []
-    project_name = conn.cursor()
-    project_name.execute("SELECT project_id, pro_key, pro_name FROM project where status_id = 1")
-    project_name = project_name.fetchall()
-    for x in project_name:
-        project.append(x)
 
-    status_model = conn.cursor()
-    sql_status = "UPDATE model SET status_id = %s WHERE status_id = %s"
-    val_status = (2,1)
-    status_model.execute(sql_status,val_status)
-    conn.commit()
+    with conn.cursor() as cur:
+        cur.execute("SELECT project_id, pro_key, pro_name FROM project WHERE status_id = 1")
+        project = cur.fetchall()
+    
+    if not project:
+        raise ValueError("No active project found")
 
-    model_name = conn.cursor()
-    sql = "INSERT INTO model (name, project_id, status_id) VALUES (%s, %s, %s)"
-    val = (model,project[0][0],1)
-    model_name.execute(sql,val)
-    conn.commit()
+    with conn.cursor() as cur:
+        cur.execute("UPDATE model SET status_id = %s WHERE status_id = %s", (2, 1))
+        conn.commit()
 
-    select_new_model = conn.cursor()
-    select_new_model.execute("SELECT model_id, name, project_id FROM model where status_id = 1 and project_id = "+str(project[0][0]))
-    select_new_model = select_new_model.fetchall()
-    for x in select_new_model:
-        models.append(x)
+        cur.execute("INSERT INTO model (name, project_id, status_id) VALUES (%s, %s, %s)", (model, project[0][0], 1))
+        conn.commit()
 
-    return models[0]    
+        cur.execute("SELECT model_id, name, project_id FROM model WHERE status_id = 1 AND project_id = %s", (project[0][0],))
+        models = cur.fetchall()
+
+    if not models:
+        raise ValueError("No models found after insertion")
+    return models[0]  
 
 def model():
-    project = []
-    models = []
-    stations = []
-    project_name = conn.cursor()
-    project_name.execute("SELECT project_id, pro_key, pro_name FROM project where status_id = 1")
-    project_name = project_name.fetchall()
-    for x in project_name:
-        project.append(x)
-    
-    model_name = conn.cursor()
-    model_name.execute("SELECT model_id, name, project_id FROM model where status_id = 1 and project_id = "+str(project[0][0]))
-    model_name = model_name.fetchall()
-    for x in model_name:
-        models.append(x)
+    try:
+        cursor_proj = conn.cursor()
+        cursor_proj.execute("SELECT project_id, pro_key, pro_name FROM project WHERE status_id = 1")
+        project = cursor_proj.fetchone()
+        cursor_proj.close()
 
-    if len(models) == 0:
-        # print(search_models)
-        new_model("Model-T1")
+        if not project:
+            # print("No hay proyecto activo.")
+            return None, None, None
+        
+        project_id = project[0]
+        cursor_model = conn.cursor()
+        cursor_model.execute(
+            "SELECT model_id, name, project_id FROM model WHERE status_id = 1 AND project_id = ?",
+            (project_id,)
+        )
+        model = cursor_model.fetchone()
+        cursor_model.close()
 
-    model_name = conn.cursor()
-    model_name.execute("SELECT model_id, name, project_id FROM model where status_id = 1 and project_id = "+str(project[0][0]))
-    model_name = model_name.fetchall()
-    for x in model_name:
-        models.append(x)
-    
-    station_name = conn.cursor()
-    station_name.execute("SELECT station_name FROM station where status_id = 1")
-    station_name = station_name.fetchall()
-    for x in station_name:
-        stations.append(x)
-    
-    # print(project)
-    return project[0],models[0],stations[0]
+        if not model:
+            new_model("Model-T1")  
+            cursor_model2 = conn.cursor()
+            cursor_model2.execute(
+                "SELECT model_id, name, project_id FROM model WHERE status_id = 1 AND project_id = ?",
+                (project_id,)
+            )
+            model = cursor_model2.fetchone()
+            cursor_model2.close()
 
+        if not model:
+            # print("No se pudo obtener o crear un modelo.")
+            return project, None, None
+
+        cursor_station = conn.cursor()
+        cursor_station.execute("SELECT station_name FROM station WHERE status_id = 1")
+        station = cursor_station.fetchone()
+        cursor_station.close()
+
+        if not station:
+            # print("No hay estaciones activas.")
+            return project, model, None
+
+        return project, model, station
+
+    except mariadb.Error as e:
+        return None, None, None
+    
 def piece_store(numPiece):
-    project = []
-    models = []
-    project_name = conn.cursor()
-    project_name.execute("SELECT project_id, pro_key, pro_name FROM project where status_id = 1")
-    project_name = project_name.fetchall()
-    for x in project_name:
-        project.append(x)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT project_id, pro_key, pro_name FROM project WHERE status_id = 1 LIMIT 1")
+        project = cursor.fetchone()
+        cursor.close()
 
-    model_name = conn.cursor()
-    model_name.execute("SELECT model_id, name FROM model where status_id = 1 and project_id = "+str(project[0][0]))
-    model_name = model_name.fetchall()
-    for x in model_name:
-        models.append(x)
+        if not project:
+            return "FAILED"
 
-    status_piece = conn.cursor()
-    sql_status = "UPDATE part SET status_id = %s WHERE status_id = %s"
-    val_status = (2,1)
-    status_piece.execute(sql_status,val_status)
-    conn.commit()
+        cursor = conn.cursor()
+        cursor.execute("SELECT model_id, name FROM model WHERE status_id = 1 AND project_id = ?", (project[0],))
+        model = cursor.fetchone()
+        cursor.close()
 
-    piece = conn.cursor()
-    sql = "INSERT INTO part (part_number, model_id, status_id) VALUES (%s, %s, %s)"
-    val = (numPiece,models[0][0],1)
-    piece.execute(sql,val)
-    conn.commit()
+        if not model:
+            return "FAILED"
+
+        # Desactivar piezas anteriores
+        # cursor = conn.cursor()
+        # cursor.execute("UPDATE part SET status_id = ? WHERE status_id = ?", (2, 1))
+        # conn.commit()
+        # cursor.close()
+
+        # Insertar nueva pieza
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO part (part_number, model_id, status_id) VALUES (?, ?, ?)", (numPiece, model[0], 3))
+        conn.commit()
+        cursor.close()
+
+        # Exportar a archivo
+        # history_xlsx.history_file_xlsx([numPiece, model[1]])
+
+        return "PASSED"
+
+    except mariadb.Error as e:
+        # print(f"[DB ERROR] {e}")
+        return "FAILED"
+    except Exception as e:
+        # print(f"[ERROR] {e}")
+        return "FAILED"
 
 def select_model(model):
-    search_models = []
-    search_model = conn.cursor()
-    search_model.execute("SELECT model_id, name, project_id FROM model where name = '"+model+"'")
-    search_model = search_model.fetchall()
-    for x in search_model:
-        search_models.append(x)
-    
-    if len(search_models) == 0:
-        # print(search_models)
-        return "0"
-    else:
-        project = []
-        models = []
-        project_name = conn.cursor()
-        project_name.execute("SELECT project_id, pro_key, pro_name FROM project where status_id = 1")
-        project_name = project_name.fetchall()
-        for x in project_name:
-            project.append(x)
+    with conn.cursor() as cur:
+        cur.execute("SELECT model_id, name, project_id FROM model WHERE name = %s", (model,))
+        search_models = cur.fetchall()
 
-        status_model = conn.cursor()
-        sql_status = "UPDATE model SET status_id = %s WHERE status_id = %s"
-        val_status = (2,1)
-        status_model.execute(sql_status,val_status)
+        if not search_models:
+            return "0"
+
+        cur.execute("SELECT project_id FROM project WHERE status_id = 1")
+        project = cur.fetchone()
+        if not project:
+            return "0"
+
+        cur.execute("UPDATE model SET status_id = %s WHERE status_id = %s", (2, 1))
         conn.commit()
 
-        select_models = conn.cursor()
-        sql_status = "UPDATE model SET status_id = %s WHERE status_id = %s AND name = %s"
-        val_status = (1,2,model)
-        select_models.execute(sql_status,val_status)
+        cur.execute("UPDATE model SET status_id = %s WHERE status_id = %s AND name = %s", (1, 2, model))
         conn.commit()
 
-        model_name = conn.cursor()
-        model_name.execute("SELECT model_id, name, project_id FROM model where status_id = 1 and project_id = "+str(project[0][0]))
-        model_name = model_name.fetchall()
-        for x in model_name:
-            models.append(x)
+       
+        cur.execute("SELECT model_id, name, project_id FROM model WHERE status_id = 1 AND project_id = %s", (project[0],))
+        models = cur.fetchall()
+
+        if not models:
+            return "0"
         
         return models[0]
 
 def stations():
-    stations = []
-    station_name = conn.cursor()
-    station_name.execute('''SELECT station_id, station_key, station_name, status_id, type_station.ts_id, type_station.ts_name AS 'Name' FROM station 
-                            inner JOIN data_tracking.type_station ON type_station.ts_id = station.ts_id
-                            WHERE status_id=1''')
-    station_name = station_name.fetchall()
-    for x in station_name:
-        stations.append(x)
-    return stations[0]
+    with conn.cursor() as cur:
+        cur.execute('''SELECT station_id, station_key, station_name, status_id, type_station.ts_id, type_station.ts_name AS Name 
+                       FROM station 
+                       INNER JOIN data_tracking_griffin.type_station ON type_station.ts_id = station.ts_id
+                       WHERE status_id = 1''')
+        result = cur.fetchone()  #
+    return result
 
-def parameters_pressfit(element,name_piece):
+def parameters_pressfit(element, name_piece):
     import evaluation
     from datetime import datetime, timezone 
     import rfc3339
 
-    tasktimestamp = datetime.now(timezone.utc).astimezone()#"2024-04-02T10:00:32Z 18:46:54"
-    last_digit = str(tasktimestamp)
-    last_digit = last_digit.split('-')
-    timer = rfc3339.rfc3339(tasktimestamp, utc=True, use_system_timezone=False)+" "+last_digit[3]
+    tasktimestamp = datetime.now(timezone.utc).astimezone()
+    last_digit = str(tasktimestamp).split('-')
+    timer = rfc3339.rfc3339(tasktimestamp, utc=True, use_system_timezone=False) + " " + last_digit[3]
 
-    measurement = []
-    pressfit_measurement = element[0]
-    measurement_key = conn.cursor()
-    measurement_key.execute("SELECT pressfit_measurement_id, name FROM `data_tracking`.`pressfit_measurement` WHERE pressfit_measurement.`key` = '"+pressfit_measurement+"'")
-    measurement_key = measurement_key.fetchall()
-    for x in measurement_key:
-        measurement.append(x)
-    
-    stations = []
-    station_name = conn.cursor()
-    station_name.execute('''SELECT station_id, station_key, station_name, status_id, type_station.ts_id, type_station.ts_name AS 'Name' FROM station 
-                            inner JOIN data_tracking.type_station ON type_station.ts_id = station.ts_id
-                            WHERE status_id=1''')
-    station_name = station_name.fetchall()
-    for x in station_name:
-        stations.append(x)
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT pressfit_measurement_id, name FROM data_tracking_griffin.pressfit_measurement WHERE `key` = %s",
+            (element[0],)
+        )
+        measurement = cur.fetchone()
+        if not measurement:
+            return "Measurement key not found"
 
-    part = []
-    part_name = conn.cursor()
-    part_name.execute("SELECT part_id, part_number, model_id FROM part WHERE part_number ='"+name_piece+"' AND status_id=1")
-    part_name = part_name.fetchall()
-    for x in part_name:
-        part.append(x)
+        cur.execute('''
+            SELECT station_id, station_key, station_name 
+            FROM station
+            INNER JOIN data_tracking_griffin.type_station ON type_station.ts_id = station.ts_id
+            WHERE status_id = 1
+            LIMIT 1
+        ''')
+        station = cur.fetchone()
+        if not station:
+            return "No active station found"
 
-    value = element[1]
-    low_limit = element[2]
-    high_limit = element[3]
-    data_type = element[4]
-    units = element[5]
-    result = element[6]
-    compoperator = evaluation.evaluation(element[1:4])
-    test_time = timer
-    metadata = element[7]
-    description = stations[0][2] + " " + measurement[0][1] +" Test"
-    pressfit_measurement_id = measurement[0][0]
-    station_id = stations[0][0]
-    part_id = part[0][0]
+        cur.execute(
+            "SELECT part_id, part_number, model_id FROM part WHERE status_id = 3 AND part_number = %s ORDER BY part_id DESC",(name_piece,)
+        )
+        part = cur.fetchone()
+        if not part:
+            return "FAILED"
 
-    parameter_pressfit = conn.cursor()
-    sql = '''INSERT INTO parameters_pressfit (value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, pressfit_measurement_id, station_id, part_id)
-             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)'''
-    val = (value, low_limit, high_limit, data_type, units, result, compoperator, test_time, metadata, description, pressfit_measurement_id, station_id, part_id)
-    parameter_pressfit.execute(sql,val)
-    conn.commit()
+        value = element[1]
+        low_limit = element[2]
+        high_limit = element[3]
+        if value == "" and low_limit == "" and high_limit == "":
+            return "GENERAL_ERROR"
+        data_type = element[4]
+        units = element[5]
+        result = element[6]
+        compoperator = evaluation.evaluation(element[1:4])
+        test_time = timer
+        metadata = element[7]
+        description = f"{station[2]} {measurement[1]} Test"
+        dwell_time = element[8]
 
-def parameters_screwing(element,name_piece):
-    import evaluation
-    from datetime import datetime, timezone 
-    import rfc3339
+        sql = '''
+            INSERT INTO parameters_pressfit
+            (value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, dwell_time, pressfit_measurement_id, station_id, part_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        '''
+        vals = (value, low_limit, high_limit, data_type, units, result, compoperator, test_time, metadata, description, dwell_time, measurement[0], station[0], part[0])
 
-    tasktimestamp = datetime.now(timezone.utc).astimezone()#"2024-04-02T10:00:32Z 18:46:54"
-    last_digit = str(tasktimestamp)
-    last_digit = last_digit.split('-')
-    timer = rfc3339.rfc3339(tasktimestamp, utc=True, use_system_timezone=False)+" "+last_digit[3]
+        try:
+            cur.execute(sql, vals)
+            conn.commit()
+        except Exception as e:
+            print("Error inserting pressfit parameter:", e)
+            return "FAILED"
 
-    measurement = []
-    screwing_measurement = element[0]
-    measurement_key = conn.cursor()
-    measurement_key.execute("SELECT screwing_measurement_id, name FROM `data_tracking`.`screwing_measurement` WHERE screwing_measurement.`key` = '"+screwing_measurement+"'")
-    measurement_key = measurement_key.fetchall()
-    for x in measurement_key:
-        measurement.append(x)
-    
-    stations = []
-    station_name = conn.cursor()
-    station_name.execute('''SELECT station_id, station_key, station_name, status_id, type_station.ts_id, type_station.ts_name AS 'Name' FROM station 
-                            inner JOIN data_tracking.type_station ON type_station.ts_id = station.ts_id
-                            WHERE status_id=1''')
-    station_name = station_name.fetchall()
-    for x in station_name:
-        stations.append(x)
-
-    part = []
-    part_name = conn.cursor()
-    part_name.execute("SELECT part_id, part_number, model_id FROM part WHERE part_number ='"+name_piece+"' AND status_id=1")
-    part_name = part_name.fetchall()
-    for x in part_name:
-        part.append(x)
-
-    value = element[1]
-    low_limit = element[2]
-    high_limit = element[3]
-    data_type = element[4]
-    units = element[5]
-    result = element[6]
-    compoperator = evaluation.evaluation(element[1:4])
-    test_time = timer
-    metadata = element[7]
-    description = stations[0][2] + " " + measurement[0][1] +" Test"
-    screwing_measurement_id = measurement[0][0]
-    station_id = stations[0][0]
-    part_id = part[0][0]
-
-    parameter_screwing = conn.cursor()
-    sql = '''INSERT INTO parameters_screwing (value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, screwing_measurement_id, station_id, part_id)
-             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)'''
-    val = (value, low_limit, high_limit, data_type, units, result, compoperator, test_time, metadata, description, screwing_measurement_id, station_id, part_id)
-    parameter_screwing.execute(sql,val)
-    conn.commit()
-
-def parameters_inspection_vs(element,name_piece):
-    import evaluation
-    from datetime import datetime, timezone 
-    import rfc3339
-
-    tasktimestamp = datetime.now(timezone.utc).astimezone()#"2024-04-02T10:00:32Z 18:46:54"
-    last_digit = str(tasktimestamp)
-    last_digit = last_digit.split('-')
-    timer = rfc3339.rfc3339(tasktimestamp, utc=True, use_system_timezone=False)+" "+last_digit[3]
-
-    measurement = []
-    inspection_measurement = element[0]
-    measurement_key = conn.cursor()
-    measurement_key.execute("SELECT inspection_measurement_id, name FROM `data_tracking`.`inspection_measurement` WHERE inspection_measurement.`key` = '"+inspection_measurement+"'")
-    measurement_key = measurement_key.fetchall()
-    for x in measurement_key:
-        measurement.append(x)
-    
-    stations = []
-    station_name = conn.cursor()
-    station_name.execute('''SELECT station_id, station_key, station_name, status_id, type_station.ts_id, type_station.ts_name AS 'Name' FROM station 
-                            inner JOIN data_tracking.type_station ON type_station.ts_id = station.ts_id
-                            WHERE status_id=1''')
-    station_name = station_name.fetchall()
-    for x in station_name:
-        stations.append(x)
-
-    part = []
-    part_name = conn.cursor()
-    part_name.execute("SELECT part_id, part_number, model_id FROM part WHERE part_number ='"+name_piece+"' AND status_id=1")
-    part_name = part_name.fetchall()
-    for x in part_name:
-        part.append(x)
-    
-    if len(part) == 0:
-        # print(search_models)
-        return "FAILED"
-
-    value = element[1]
-    low_limit = element[2]
-    high_limit = element[3]
-    data_type = element[4]
-    units = element[5]
-    result = element[6]
-    compoperator = evaluation.evaluation(element[1:4])
-    test_time = timer
-    metadata = element[7]
-    description = stations[0][2] + " " + measurement[0][1] +" VS - Test"
-    inspection_measurement_id = measurement[0][0]
-    station_id = stations[0][0]
-    part_id = part[0][0]
-    type_inspection_id = 1
-
-    parameter_inspection = conn.cursor()
-    sql = '''INSERT INTO parameters_inspection (value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, inspection_measurement_id, station_id, part_id, type_inspection_id)
-             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)'''
-    val = (value, low_limit, high_limit, data_type, units, result, compoperator, test_time, metadata, description, inspection_measurement_id, station_id, part_id, type_inspection_id)
-    parameter_inspection.execute(sql,val)
-    conn.commit()
-
-def parameters_inspection_xt(element,name_piece):
-    import evaluation
-    from datetime import datetime, timezone 
-    import rfc3339
-
-    tasktimestamp = datetime.now(timezone.utc).astimezone()#"2024-04-02T10:00:32Z 18:46:54"
-    last_digit = str(tasktimestamp)
-    last_digit = last_digit.split('-')
-    timer = rfc3339.rfc3339(tasktimestamp, utc=True, use_system_timezone=False)+" "+last_digit[3]
-
-    measurement = []
-    inspection_measurement = element[0]
-    measurement_key = conn.cursor()
-    measurement_key.execute("SELECT inspection_measurement_id, name FROM `data_tracking`.`inspection_measurement` WHERE inspection_measurement.`key` = '"+inspection_measurement+"'")
-    measurement_key = measurement_key.fetchall()
-    for x in measurement_key:
-        measurement.append(x)
-    
-    stations = []
-    station_name = conn.cursor()
-    station_name.execute('''SELECT station_id, station_key, station_name, status_id, type_station.ts_id, type_station.ts_name AS 'Name' FROM station 
-                            inner JOIN data_tracking.type_station ON type_station.ts_id = station.ts_id
-                            WHERE status_id=1''')
-    station_name = station_name.fetchall()
-    for x in station_name:
-        stations.append(x)
-
-    part = []
-    part_name = conn.cursor()
-    part_name.execute("SELECT part_id, part_number, model_id FROM part WHERE part_number ='"+name_piece+"' AND status_id=1")
-    part_name = part_name.fetchall()
-    for x in part_name:
-        part.append(x)
-    
-    if len(part) == 0:
-        # print(search_models)
-        return "FAILED"
-
-    value = element[1]
-    low_limit = element[2]
-    high_limit = element[3]
-    data_type = element[4]
-    units = element[5]
-    result = element[6]
-    compoperator = evaluation.evaluation(element[1:4])
-    test_time = timer
-    metadata = element[7]
-    description = stations[0][2] + " " + measurement[0][1] +" XT - Test"
-    inspection_measurement_id = measurement[0][0]
-    station_id = stations[0][0]
-    part_id = part[0][0]
-    type_inspection_id = 2
-
-    parameter_inspection = conn.cursor()
-    sql = '''INSERT INTO parameters_inspection (value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, inspection_measurement_id, station_id, part_id, type_inspection_id)
-             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)'''
-    val = (value, low_limit, high_limit, data_type, units, result, compoperator, test_time, metadata, description, inspection_measurement_id, station_id, part_id, type_inspection_id)
-    parameter_inspection.execute(sql,val)
-    conn.commit()
-
-def duration(element,name_piece):
-    element = element.split(',')
-    
-    from datetime import datetime, timezone 
-    import rfc3339
-
-    task_timestamp = datetime.now(timezone.utc).astimezone()#"2024-04-02T10:00:32Z 18:46:54"
-    last_digit = str(task_timestamp)
-    last_digit = last_digit.split('-')
-    timer = rfc3339.rfc3339(task_timestamp, utc=True, use_system_timezone=False)+" "+last_digit[3]
-
-    stations = []
-    station_name = conn.cursor()
-    station_name.execute('''SELECT station_id, station_key, station_name, status_id, type_station.ts_id, type_station.ts_name AS 'Name' FROM station 
-                            inner JOIN data_tracking.type_station ON type_station.ts_id = station.ts_id
-                            WHERE status_id=1''')
-    station_name = station_name.fetchall()
-    for x in station_name:
-        stations.append(x)
-
-    part = []
-    part_name = conn.cursor()
-    part_name.execute("SELECT part_id, part_number, model_id FROM part WHERE part_number ='"+name_piece+"' AND status_id=1")
-    part_name = part_name.fetchall()
-    for x in part_name:
-        part.append(x)
-    
-    if len(part) == 0:
-        print("vacio")
-        return "FAILED"
-
-    station_id = stations[0][0]
-    part_id = part[0][0]
-    taskresult = element[1]
-    tasktimestamp = timer
-    taskduration = element[2]
-    metadata = element[3]
-
-    durations = conn.cursor()
-    sql = '''INSERT INTO duration (station_id, part_id, taskresult, tasktimestamp, taskduration, metadata)
-             VALUES (%s, %s, %s, %s, %s, %s)'''
-    val = (station_id, part_id, taskresult, tasktimestamp, taskduration, metadata)
-    durations.execute(sql,val)
-    conn.commit()
-
+    # num_piece = ["", "", value, low_limit, high_limit, data_type, units, result, compoperator, test_time, metadata, description, dwell_time]
+    # history_xlsx.history_file_xlsx(num_piece)
     return "PASSED"
-#################################################### Consultas para el archivo JSON ##############################################
-def pieces():
-    part = []
-    part_name = conn.cursor()
-    part_name.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id=1")
-    part_name = part_name.fetchall()
-    for x in part_name:
-        part.append(x)
+
+def parameters_screwing(element, name_piece):
+    import evaluation
+    from datetime import datetime, timezone 
+    import rfc3339
+
+    try:
+        # Timestamp actual
+        now = datetime.now(timezone.utc).astimezone()
+        test_time = rfc3339.rfc3339(now, utc=True, use_system_timezone=False)
+
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT screwing_measurement_id, name 
+            FROM screwing_measurement 
+            WHERE screwing_measurement.key = ?
+        """, (element[0],))
+        measurement = cursor.fetchone()
+        cursor.close()
+
+        if not measurement:
+            raise ValueError("Measurement no encontrado para key: " + element[0])
+
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT station_id, station_key, station_name 
+            FROM station 
+            WHERE status_id = 1
+        """)
+        station = cursor.fetchone()
+        cursor.close()
+
+        if not station:
+            raise ValueError("No hay estaciones activas")
+
+        cursor = conn.cursor()
+        cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 3 AND part_number = %s ORDER BY part_id DESC",(name_piece,))
+        part = cursor.fetchone()
+        cursor.close()
+
+        if not part:
+            # raise ValueError("Parte no encontrada: " + name_piece)
+            return "FAILED"
+        value, low_limit, high_limit, data_type, units, result, metadata = element[1:8]
+        compoperator = evaluation.evaluation(element[1:4])
+        description = f"{measurement[1]}_{element[8]}"
+        screwing_measurement_id = measurement[0]
+        station_id = station[0]
+        part_id = part[0]
+        cursor = conn.cursor()
+        sql = '''
+            INSERT INTO parameters_screwing (
+                value, low_limit, high_limit, data_type, unit, result, 
+                compoperator, test_time, metadata, description, 
+                screwing_measurement_id, station_id, part_id
+            ) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        '''
+        val = (
+            value, low_limit, high_limit, data_type, units, result,
+            compoperator, test_time, metadata, description,
+            screwing_measurement_id, station_id, part_id
+        )
+        cursor.execute(sql, val)
+        conn.commit()
+        cursor.close()
+
+    except mariadb.Error as e:
+        print(f"[DB ERROR] {e}")
+        return f"[DB ERROR] {e}"
+    except Exception as e:
+        print(f"[GENERAL_ERROR] {e}")
+        return "GENERAL_ERROR"
+
+    # num_piece = ["","",value, low_limit, high_limit, data_type, units, result, compoperator, test_time, metadata, description, ""]
+    # history_xlsx.history_file_xlsx(num_piece)
+
+def parameters_inspection_vs(element, name_piece):
+    import evaluation
+    from datetime import datetime, timezone
+    import rfc3339
+
+    try:
+        # Timestamp formateado correctamente
+        now = datetime.now(timezone.utc).astimezone()
+        test_time = rfc3339.rfc3339(now, utc=True, use_system_timezone=False)
+
+        # Obtener measurement
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT inspection_measurement_id, name 
+            FROM inspection_measurement 
+            WHERE inspection_measurement.key = ?
+        """, (element[0],))
+        measurement = cursor.fetchone()
+        cursor.close()
+
+        if not measurement:
+            # print("Measurement no encontrado:", element[0])
+            return "FAILED"
+
+        # Obtener station
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT station_id, station_key, station_name 
+            FROM station 
+            INNER JOIN type_station ON type_station.ts_id = station.ts_id
+            WHERE status_id = 1
+        """)
+        station = cursor.fetchone()
+        cursor.close()
+
+        if not station:
+            # print("No se encontró una estación activa")
+            return "FAILED"
+
+        # Obtener part
+        cursor = conn.cursor()
+        cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 3 AND part_number = %s ORDER BY part_id DESC",(name_piece,))
+        part = cursor.fetchone()
+        cursor.close()
+
+        if not part:
+            # print("Parte no encontrada:", name_piece)
+            return "FAILED"
+
+        # Preparar datos
+        value, low_limit, high_limit, data_type, units, result, metadata = element[1:8]
+        compoperator = evaluation.evaluation(element[1:4])
+        description = f"{station[2]} {measurement[1]} VS - Test"
+        inspection_measurement_id = measurement[0]
+        station_id = station[0]
+        part_id = part[0]
+        type_inspection_id = 1
+
+        # Insertar en DB
+        cursor = conn.cursor()
+        sql = '''
+            INSERT INTO parameters_inspection (
+                value, low_limit, high_limit, data_type, unit, result, 
+                compoperator, test_time, metadata, description, 
+                inspection_measurement_id, station_id, part_id, type_inspection_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        '''
+        val = (
+            value, low_limit, high_limit, data_type, units, result,
+            compoperator, test_time, metadata, description,
+            inspection_measurement_id, station_id, part_id, type_inspection_id
+        )
+        cursor.execute(sql, val)
+        conn.commit()
+
+        # num_piece = ["","",value, low_limit, high_limit, data_type, units, result, compoperator, test_time, metadata, description, ""]
+        # history_xlsx.history_file_xlsx(num_piece)
+        
+        cursor.close()
+        return "PASSED"
+
+    except mariadb.Error as e:
+        print("[DB ERROR]", e)
+        return "FAILED"
+    except Exception as e:
+        print("[GENERAL ERROR]", e)
+        return "GENERAL_ERROR"
+
     
-    return part[0]
+
+def parameters_inspection_xt(element, name_piece):
+    import evaluation
+    from datetime import datetime, timezone
+    import rfc3339
+
+    try:
+        # Generar timestamp en formato RFC 3339 (sin manipulaciones innecesarias)
+        now = datetime.now(timezone.utc).astimezone()
+        test_time = rfc3339.rfc3339(now, utc=True, use_system_timezone=False)
+
+        # Obtener measurement
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT inspection_measurement_id, name 
+            FROM data_tracking_griffin.inspection_measurement 
+            WHERE inspection_measurement.key = ?
+        """, (element[0],))
+        measurement = cursor.fetchone()
+        cursor.close()
+
+        if not measurement:
+            # print(f"[WARNING] Measurement no encontrado: {element[0]}")
+            return "FAILED"
+
+        # Obtener station
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT station_id, station_key, station_name 
+            FROM station 
+            INNER JOIN data_tracking_griffin.type_station ON type_station.ts_id = station.ts_id
+            WHERE status_id = 1
+        """)
+        station = cursor.fetchone()
+        cursor.close()
+
+        if not station:
+            # print("[WARNING] No se encontró estación activa.")
+            return "FAILED"
+
+        # Obtener part
+        cursor = conn.cursor()
+        cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 3 AND part_number = %s ORDER BY part_id DESC",(name_piece,))
+        part = cursor.fetchone()
+        cursor.close()
+
+        if not part:
+            # print(f"[WARNING] Parte no encontrada: {name_piece}")
+            return "FAILED"
+
+        # Descomponer datos del elemento
+        value, low_limit, high_limit, data_type, units, result, metadata = element[1:8]
+        # value = element[1]
+        # low_limit = element[2]
+        # high_limit = element[3]
+        if value == "" and low_limit == "" and high_limit == "":
+            return "GENERAL_ERROR"
+        compoperator = evaluation.evaluation(element[1:4])
+        description = f"{station[2]} {measurement[1]} XT - Test"
+        inspection_measurement_id = measurement[0]
+        station_id = station[0]
+        part_id = part[0]
+        type_inspection_id = 2  # XT
+
+        # Insertar en la base de datos
+        cursor = conn.cursor()
+        sql = '''
+            INSERT INTO parameters_inspection (
+                value, low_limit, high_limit, data_type, unit, result,
+                compoperator, test_time, metadata, description,
+                inspection_measurement_id, station_id, part_id, type_inspection_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        '''
+        val = (
+            value, low_limit, high_limit, data_type, units, result,
+            compoperator, test_time, metadata, description,
+            inspection_measurement_id, station_id, part_id, type_inspection_id
+        )
+        cursor.execute(sql, val)
+        conn.commit()
+        cursor.close()
+        # num_piece = ["","",value, low_limit, high_limit, data_type, units, result, compoperator, test_time, metadata, description, ""]
+        # history_xlsx.history_file_xlsx(num_piece)
+        return "PASSED"
+
+    except mariadb.Error as e:
+        print(f"[DB ERROR] {e}")
+        return "FAILED"
+    except Exception as e:
+        print(f"[ERROR GENERAL] {e}")
+        return "GENERAL_ERROR"
+
+
+def parameters_electrical(element, name_piece):
+    import evaluation
+    from datetime import datetime, timezone
+    import rfc3339
+
+    try:
+        # Obtener timestamp en formato RFC3339 (sin manipular strings)
+        now = datetime.now(timezone.utc).astimezone()
+        test_time = rfc3339.rfc3339(now, utc=True, use_system_timezone=False)
+
+        # Obtener measurement_id y name
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT electrical_measurement_id, name 
+            FROM data_tracking_griffin.electrical_measurement 
+            WHERE electrical_measurement.key = ?
+        """, (element[0],))
+        measurement = cursor.fetchone()
+        cursor.close()
+
+        if not measurement:
+            # print(f"[WARNING] No se encontró medición: {element[0]}")
+            return "FAILED"
+
+        # Obtener primera estación activa
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT station_id, station_name 
+            FROM station 
+            INNER JOIN data_tracking_griffin.type_station ON type_station.ts_id = station.ts_id
+            WHERE station.status_id = 1
+            LIMIT 1
+        """)
+        station = cursor.fetchone()
+        cursor.close()
+
+        if not station:
+            # print("[WARNING] No hay estaciones activas")
+            return "FAILED"
+
+        # Obtener parte
+        cursor = conn.cursor()
+        cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 3 AND part_number = %s ORDER BY part_id DESC",(name_piece,))
+        part = cursor.fetchone()
+        cursor.close()
+
+        if not part:
+            # print(f"[WARNING] Parte no encontrada: {name_piece}")
+            return "FAILED"
+
+        # Extraer y preparar datos
+        value, low_limit, high_limit, data_type, units, result, metadata = element[1:8]
+        compoperator = evaluation.evaluation(element[1:4])
+        description = f"{measurement[1]}"
+
+        # Insertar en tabla
+        cursor = conn.cursor()
+        sql = '''
+            INSERT INTO parameters_electrical (
+                value, low_limit, high_limit, data_type, unit, result,
+                compoperator, test_time, metadata, description,
+                electrical_measurement_id, station_id, part_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        '''
+        val = (
+            value, low_limit, high_limit, data_type, units, result,
+            compoperator, test_time, metadata, description,
+            measurement[0], station[0], part[0]
+        )
+        cursor.execute(sql, val)
+        conn.commit()
+        cursor.close()
+        # num_piece = ["","",value, low_limit, high_limit, data_type, units, result, compoperator, test_time, metadata, description, ""]
+        # history_xlsx.history_file_xlsx(num_piece)
+        return "PASSED"
+
+    except mariadb.Error as e:
+        # print(f"[DB ERROR] {e}")
+        return "FAILED"
+
+    except Exception as e:
+        # print(f"[ERROR] {e}")
+        return "GENERAL_ERROR"
+
+def duration(element, name_piece):
+    import rfc3339
+    from datetime import datetime, timezone
+
+    try:
+        # Parsear entrada
+        element = element.split(',')
+        taskresult = element[1]
+        taskduration = element[2]
+        metadata = element[3]
+
+        # Generar timestamp RFC3339
+        task_timestamp = datetime.now(timezone.utc).astimezone()
+        last_digit = str(task_timestamp).split('-')[3]
+        tasktimestamp = rfc3339.rfc3339(task_timestamp, utc=True, use_system_timezone=False) + " " + last_digit
+
+        # Obtener estación activa
+        with conn.cursor() as cursor:
+            cursor.execute('''SELECT station_id FROM station 
+                              INNER JOIN data_tracking_griffin.type_station ON type_station.ts_id = station.ts_id
+                              WHERE status_id = 1 LIMIT 1''')
+            station = cursor.fetchone()
+            if not station:
+                # print("[ERROR] No hay estación activa")
+                return "FAILED"
+            station_id = station[0]
+
+        # Obtener parte activa
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 3 AND part_number = %s ORDER BY part_id DESC", (name_piece,))
+            part = cursor.fetchone()
+            if not part:
+                # print("[ERROR] Pieza no encontrada")
+                return "FAILED"
+            part_id = part[0]
+
+        # Insertar duración
+        with conn.cursor() as cursor:
+            sql = '''INSERT INTO duration (station_id, part_id, taskresult, tasktimestamp, taskduration, metadata)
+                     VALUES (?, ?, ?, ?, ?, ?)'''
+            val = (station_id, part_id, taskresult, tasktimestamp, taskduration, metadata)
+            cursor.execute(sql, val)
+            conn.commit()
+
+        # Desactivar piezas anteriores
+        cursor = conn.cursor()
+        cursor.execute("UPDATE part SET status_id = ? WHERE status_id = ? AND part_number = ?", (2, 3, name_piece))
+        conn.commit()
+        cursor.close()
+
+        # Eliminar pieza de la tabla serial_number
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM serial_number WHERE data = ?", (name_piece,))
+        conn.commit()
+        cursor.close()
+
+        # Registrar en historial
+        # num_piece = [""] * 13 + [taskresult, tasktimestamp, taskduration, metadata]
+        # history_xlsx.history_file_xlsx(num_piece)
+
+        return "PASSED"
+
+    except Exception as e:
+        # print(f"[ERROR] {e}")
+        return "FAILED"
+
+#################################################### Consultas para el archivo JSON ##############################################
+def pieces(parte):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT part_id, part_number, model_id, create_registration FROM part WHERE status_id = 2 AND part_number = %s ORDER BY part_id DESC LIMIT 1",(parte,))
+            part = cursor.fetchone()
+            if not part:
+                return None  # O podrías lanzar una excepción si prefieres
+
+            return part
+
+    except Exception as e:
+        # print(f"[ERROR] pieces(): {e}")
+        return None
+
 
 def duration_json(station_id, part_id):
-    duration_data = []
-    durationJson = conn.cursor()
-    durationJson.execute("SELECT taskresult, tasktimestamp, taskduration, metadata FROM duration WHERE station_id ='"+str(station_id)+"' AND part_id = '"+str(part_id)+"'")
-    durationJson = durationJson.fetchall()
-    for x in durationJson:
-        duration_data.append(x)
-    return duration_data[0]
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT taskresult, tasktimestamp, taskduration, metadata, create_registration FROM duration WHERE station_id = %s AND part_id = %s ORDER BY duration_id DESC LIMIT 1",
+                (station_id, part_id)
+            )
+            result = cursor.fetchone()
+            return result if result else None
+
+    except Exception as e:
+        # print(f"[ERROR] duration_json(): {e}")
+        return None
 
 def inspection_data(part_id):
-    inspection = []
-    inspectionJson = conn.cursor()
-    inspectionJson.execute('''SELECT parameters_inspection.inspection_measurement_id, value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, inspection_measurement.name FROM parameters_inspection 
-                           inner JOIN data_tracking.inspection_measurement ON inspection_measurement.inspection_measurement_id = parameters_inspection.inspection_measurement_id
-                           WHERE part_id = '''+"'"+str(part_id)+"' ORDER BY inspection_measurement_id ASC")
-    inspectionJson =inspectionJson.fetchall()
-    for x in inspectionJson:
-        inspection.append(x)
-        
-    return inspection
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT *
+                FROM (
+                    SELECT 
+                        parameters_inspection.inspection_measurement_id, 
+                        value, 
+                        low_limit, 
+                        high_limit, 
+                        data_type, 
+                        unit, 
+                        result, 
+                        compoperator, 
+                        test_time, 
+                        metadata, 
+                        description, 
+                        inspection_measurement.name,
+                        parameters_inspection.type_inspection_id,
+                        parameters_inspection.parameters_inspection_id,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY parameters_inspection.type_inspection_id
+                            ORDER BY test_time DESC
+                        ) AS rn
+                    FROM parameters_inspection 
+                    INNER JOIN data_tracking_griffin.inspection_measurement 
+                        ON inspection_measurement.inspection_measurement_id = parameters_inspection.inspection_measurement_id
+                    WHERE part_id = %s
+                ) t
+                WHERE 
+                    (type_inspection_id = 1 AND rn <= 3)
+                OR (type_inspection_id <> 1 AND rn <= 4)
+                ORDER BY parameters_inspection_id DESC;
+            ''', (part_id,))
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] inspection_data(): {e}")
+        return []
 
 def screwing_data(part_id):
-    screwing = []
-    screwingJson = conn.cursor()
-    screwingJson.execute('''SELECT parameters_screwing.screwing_measurement_id, value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, screwing_measurement.name FROM parameters_screwing 
-                           inner JOIN data_tracking.screwing_measurement ON screwing_measurement.screwing_measurement_id = parameters_screwing.screwing_measurement_id
-                           WHERE part_id = '''+"'"+str(part_id)+"' ORDER BY screwing_measurement_id ASC")
-    screwingJson =screwingJson.fetchall()
-    for x in screwingJson:
-        screwing.append(x)
-        
-    return screwing
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    parameters_screwing.screwing_measurement_id, 
+                    value, 
+                    low_limit, 
+                    high_limit, 
+                    data_type, 
+                    unit, 
+                    result, 
+                    compoperator, 
+                    test_time, 
+                    metadata, 
+                    description, 
+                    screwing_measurement.name 
+                FROM parameters_screwing 
+                INNER JOIN data_tracking_griffin.screwing_measurement 
+                    ON screwing_measurement.screwing_measurement_id = parameters_screwing.screwing_measurement_id
+                WHERE part_id = %s
+                ORDER BY parameters_screwing_id ASC
+                
+            ''', (part_id,))
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] screwing_data(): {e}")
+        return []
 
 def pressfit_data(part_id):
-    pressfit = []
-    pressfitJson = conn.cursor()
-    pressfitJson.execute('''SELECT parameters_pressfit.pressfit_measurement_id, value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, pressfit_measurement.name FROM parameters_pressfit 
-                           inner JOIN data_tracking.pressfit_measurement ON pressfit_measurement.pressfit_measurement_id = parameters_pressfit.pressfit_measurement_id
-                           WHERE part_id = '''+"'"+str(part_id)+"' ORDER BY pressfit_measurement_id ASC")
-    pressfitJson =pressfitJson.fetchall()
-    for x in pressfitJson:
-        pressfit.append(x)
-        
-    return pressfit
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    parameters_pressfit.pressfit_measurement_id, 
+                    value, 
+                    low_limit, 
+                    high_limit, 
+                    data_type, 
+                    unit, 
+                    result, 
+                    compoperator, 
+                    test_time, 
+                    metadata, 
+                    description, 
+                    pressfit_measurement.name, 
+                    dwell_time 
+                FROM parameters_pressfit 
+                INNER JOIN data_tracking_griffin.pressfit_measurement 
+                    ON pressfit_measurement.pressfit_measurement_id = parameters_pressfit.pressfit_measurement_id
+                WHERE part_id = %s
+                ORDER BY parameters_pressfit_id ASC
+                
+            ''', (part_id,))
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] pressfit_data(): {e}")
+        return []
+
+def electrical_data(part_id):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    parameters_electrical.electrical_measurement_id, 
+                    value, 
+                    low_limit, 
+                    high_limit, 
+                    data_type, 
+                    unit, 
+                    result, 
+                    compoperator, 
+                    test_time, 
+                    metadata, 
+                    description, 
+                    electrical_measurement.name 
+                FROM parameters_electrical
+                INNER JOIN data_tracking_griffin.electrical_measurement 
+                    ON electrical_measurement.electrical_measurement_id = parameters_electrical.electrical_measurement_id
+                WHERE part_id = %s
+                ORDER BY parameters_electrical_id DESC
+                LIMIT 4
+            ''', (part_id,))
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] electrical_data(): {e}")
+        return []
+    
+def continuity_data(part_id):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    measurement_name, 
+                    description, 
+                    compoperator, 
+                    low_limit,
+                    high_limit, 
+                    unit_measurement, 
+                    status, 
+                    value, 
+                    defect_code,
+                    create_registration
+                FROM parameters_continuity
+                WHERE part_id = %s
+                ORDER BY parameters_continuity_id DESC
+                LIMIT 1
+            ''', (part_id,))
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] electrical_data(): {e}")
+        return []
+    
+def leaktest_data(part_id):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    measurement_name, 
+                    trial_period, 
+                    value, 
+                    result,
+                    unit, 
+                    description, extra1, extra2, compoperator, test,
+                    create_registration
+                FROM parameters_leaktest
+                WHERE part_id = %s
+                ORDER BY parameters_leaktest_id DESC
+                LIMIT 2
+            ''', (part_id,))
+            # print(cursor.fetchall())
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] electrical_data(): {e}")
+        return []
+    
+def welding_data(part_id):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    measurement_name, 
+                    welding_time, 
+                    welding_power, 
+                    collapse_distance,
+                    description,
+                    result,
+                    unit, 
+                    extra1,
+                    compoperator,
+                    create_registration
+                FROM parameters_welding
+                WHERE part_id = %s
+                ORDER BY parameters_welding_id DESC
+                LIMIT 1
+            ''', (part_id,))
+            # print(cursor.fetchall())
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] electrical_data(): {e}")
+        return []
+    
+def heatstake_data(part_id):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    part_id, 
+                    cicle_time, 
+                    serial_number, 
+                    program_name,
+                    times_tamp,
+                    grade,
+                    description,
+                    create_registration
+                FROM heatstake
+                WHERE part_id = %s
+                ORDER BY heatstake_id ASC
+            ''', (part_id,))
+            # print(cursor.fetchall())
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] electrical_data(): {e}")
+        return []
+    
+def graph_data(part_id):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    part_id, 
+                    data_image, 
+                    description,
+                    create_registration
+                FROM graph_image
+                WHERE part_id = %s
+                ORDER BY graph_image_id ASC
+            ''', (part_id,))
+            # print(cursor.fetchall())
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] electrical_data(): {e}")
+        return []
+    
+def temperature_data(part_id):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    measurement_name, 
+                    start_time, 
+                    end_time, 
+                    initial_temperature,
+                    final_temperature, 
+                    unit,
+                    description, extra1, extra2,
+                    low_limit, high_limit
+                FROM parameters_temperature
+                WHERE part_id = %s
+                ORDER BY parameters_temperature_id DESC
+            ''', (part_id,))
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] temperature_data(): {e}")
+        return []
+    
+def component_data(part_id):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    component_name,
+                    description
+                FROM component
+                WHERE part_id = %s
+                ORDER BY component_id ASC
+            ''', (part_id,))
+            # print(cursor.fetchall())
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] electrical_data(): {e}")
+        return []
+    
+
+def weight_data(part_id):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    weight_name,
+                    description
+                FROM weight
+                WHERE part_id = %s
+                ORDER BY weight_id ASC
+            ''', (part_id,))
+            # print(cursor.fetchall())
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] electrical_data(): {e}")
+        return []
+    
+############################################# Archivos por prueba ##################################################
+
+def screwing_data3(part_id, limite):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    parameters_screwing.screwing_measurement_id, 
+                    value, 
+                    low_limit, 
+                    high_limit, 
+                    data_type, 
+                    unit, 
+                    result, 
+                    compoperator, 
+                    test_time, 
+                    metadata, 
+                    description, 
+                    screwing_measurement.name 
+                FROM parameters_screwing 
+                INNER JOIN data_tracking_griffin.screwing_measurement 
+                    ON screwing_measurement.screwing_measurement_id = parameters_screwing.screwing_measurement_id
+                WHERE part_id = %s
+                ORDER BY screwing_measurement_id DESC
+                LIMIT %s
+            ''', (part_id,limite))
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] screwing_data(): {e}")
+        return []
+    
+def pressfit_data3(part_id,limite):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    parameters_pressfit.pressfit_measurement_id, 
+                    value, 
+                    low_limit, 
+                    high_limit, 
+                    data_type, 
+                    unit, 
+                    result, 
+                    compoperator, 
+                    test_time, 
+                    metadata, 
+                    description, 
+                    pressfit_measurement.name, 
+                    dwell_time 
+                FROM parameters_pressfit 
+                INNER JOIN data_tracking_griffin.pressfit_measurement 
+                    ON pressfit_measurement.pressfit_measurement_id = parameters_pressfit.pressfit_measurement_id
+                WHERE part_id = %s
+                ORDER BY pressfit_measurement_id DESC
+                LIMIT %s
+            ''', (part_id,limite))
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] pressfit_data(): {e}")
+        return []
+
+def inspection_data3(part_id):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    parameters_inspection.inspection_measurement_id, 
+                    value, 
+                    low_limit, 
+                    high_limit, 
+                    data_type, 
+                    unit, 
+                    result, 
+                    compoperator, 
+                    test_time, 
+                    metadata, 
+                    description, 
+                    inspection_measurement.name 
+                FROM parameters_inspection 
+                INNER JOIN data_tracking_griffin.inspection_measurement 
+                    ON inspection_measurement.inspection_measurement_id = parameters_inspection.inspection_measurement_id
+                WHERE part_id = %s
+                ORDER BY parameters_inspection_id ASC
+            ''', (part_id,))
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] inspection_data(): {e}")
+        return []
+    
+def electrical_data3(part_id,limite):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    parameters_electrical.electrical_measurement_id, 
+                    value, 
+                    low_limit, 
+                    high_limit, 
+                    data_type, 
+                    unit, 
+                    result, 
+                    compoperator, 
+                    test_time, 
+                    metadata, 
+                    description, 
+                    electrical_measurement.name 
+                FROM parameters_electrical
+                INNER JOIN data_tracking_griffin.electrical_measurement 
+                    ON electrical_measurement.electrical_measurement_id = parameters_electrical.electrical_measurement_id
+                WHERE part_id = %s
+                ORDER BY electrical_measurement_id DESC
+                LIMIT %s
+            ''', (part_id,limite))
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] electrical_data(): {e}")
+        return []
+    
+def continuity_data3(part_id,limite):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    measurement_name, 
+                    description, 
+                    compoperator, 
+                    low_limit,
+                    high_limit, 
+                    unit_measurement, 
+                    status, 
+                    value, 
+                    defect_code
+                FROM parameters_continuity
+                WHERE part_id = %s
+                ORDER BY parameters_continuity_id DESC
+                LIMIT %s
+            ''', (part_id,limite))
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] electrical_data(): {e}")
+        return []
+    
+def leaktest_data3(part_id,limite):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    measurement_name, 
+                    trial_period, 
+                    value, 
+                    result,
+                    unit, 
+                    description, extra1, extra2
+                FROM parameters_leaktest
+                WHERE part_id = %s
+                ORDER BY parameters_leaktest_id DESC
+                LIMIT %s
+            ''', (part_id,limite))
+            # print(cursor.fetchall())
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] electrical_data(): {e}")
+        return []
+    
+def welding_data3(part_id,limite):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    measurement_name, 
+                    welding_time, 
+                    welding_power, 
+                    collapse_distance,
+                    description,
+                    result,
+                    unit, extra1
+                FROM parameters_welding
+                WHERE part_id = %s
+                ORDER BY parameters_welding_id DESC
+                LIMIT %s
+            ''', (part_id,limite))
+            # print(cursor.fetchall())
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] electrical_data(): {e}")
+        return []
+    
+def welding_data3(part_id,limite):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    measurement_name, 
+                    welding_time, 
+                    welding_power, 
+                    collapse_distance,
+                    description,
+                    result,
+                    unit, extra1
+                FROM parameters_welding
+                WHERE part_id = %s
+                ORDER BY parameters_welding_id DESC
+                LIMIT %s
+            ''', (part_id,limite))
+            # print(cursor.fetchall())
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] electrical_data(): {e}")
+        return []
+    
+def temperature_data3(part_id,limite):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    measurement_name, 
+                    start_time, 
+                    end_time, 
+                    initial_temperature,
+                    final_temperature, 
+                    unit,
+                    description, extra1, extra2
+                FROM parameters_temperature
+                WHERE part_id = %s
+                ORDER BY parameters_temperature_id DESC
+                LIMIT %s
+            ''', (part_id,limite))
+            # print(cursor.fetchall())
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] electrical_data(): {e}")
+        return []
+
+####################################################################################################################
+    
 ############################################# View Table ###########################################################
 
 def inspection_data2(part_id):
     inspection = []
-    inspectionJson = conn.cursor()
-    inspectionJson.execute('''SELECT inspection_measurement.name, value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, parameters_inspection.inspection_measurement_id FROM parameters_inspection 
-                           inner JOIN data_tracking.inspection_measurement ON inspection_measurement.inspection_measurement_id = parameters_inspection.inspection_measurement_id
-                           WHERE part_id = '''+"'"+str(part_id)+"' ORDER BY parameters_inspection_id DESC LIMIT 6")
-    inspectionJson =inspectionJson.fetchall()
-    for x in inspectionJson:
-        inspection.append(x)
-        
-    return inspection
+    try:
+        inspectionJson = conn.cursor()
+        inspectionJson.execute('''SELECT inspection_measurement.name, value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, parameters_inspection.inspection_measurement_id FROM parameters_inspection 
+                            inner JOIN data_tracking_griffin.inspection_measurement ON inspection_measurement.inspection_measurement_id = parameters_inspection.inspection_measurement_id
+                            WHERE part_id = '''+"'"+str(part_id)+"' ORDER BY parameters_inspection_id DESC LIMIT 4")
+        results =inspectionJson.fetchall()
+        for x in results:
+            inspection.append(x)
+
+        # print(inspection) 
+        return inspection
+    except mariadb.Error as e:
+        # print(f"Error en pressfit_data2: {e}")
+        return []
+
+    finally:
+        inspectionJson.close()
 
 def screwing_data2(part_id):
     screwing = []
-    screwingJson = conn.cursor()
-    screwingJson.execute('''SELECT screwing_measurement.name, value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, parameters_screwing.screwing_measurement_id FROM parameters_screwing 
-                           inner JOIN data_tracking.screwing_measurement ON screwing_measurement.screwing_measurement_id = parameters_screwing.screwing_measurement_id
-                           WHERE part_id = '''+"'"+str(part_id)+"' ORDER BY parameters_screwing_id DESC LIMIT 6")
-    screwingJson =screwingJson.fetchall()
-    for x in screwingJson:
-        screwing.append(x)
-        
-    return screwing
+    try:
+        screwingJson = conn.cursor()
+        screwingJson.execute('''SELECT screwing_measurement.name, value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, parameters_screwing.screwing_measurement_id FROM parameters_screwing 
+                            inner JOIN data_tracking_griffin.screwing_measurement ON screwing_measurement.screwing_measurement_id = parameters_screwing.screwing_measurement_id
+                            WHERE part_id = '''+"'"+str(part_id)+"' ORDER BY parameters_screwing_id DESC LIMIT 4")
+        results =screwingJson.fetchall()
+        for x in results:
+            screwing.append(x)
+            
+        return screwing
+    except mariadb.Error as e:
+        # print(f"Error en pressfit_data2: {e}")
+        return []
+
+    finally:
+        screwingJson.close()
 
 def pressfit_data2(part_id):
     pressfit = []
-    pressfitJson = conn.cursor()
-    pressfitJson.execute('''SELECT pressfit_measurement.name, value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, parameters_pressfit.pressfit_measurement_id FROM parameters_pressfit 
-                           inner JOIN data_tracking.pressfit_measurement ON pressfit_measurement.pressfit_measurement_id = parameters_pressfit.pressfit_measurement_id
-                           WHERE part_id = '''+"'"+str(part_id)+"' ORDER BY parameters_pressfit_id DESC LIMIT 6")
-    pressfitJson =pressfitJson.fetchall()
-    for x in pressfitJson:
-        pressfit.append(x)
+    try:
+        pressfitJson = conn.cursor()
+        pressfitJson.execute('''SELECT pressfit_measurement.name, value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, parameters_pressfit.pressfit_measurement_id FROM parameters_pressfit 
+                            inner JOIN data_tracking_griffin.pressfit_measurement ON pressfit_measurement.pressfit_measurement_id = parameters_pressfit.pressfit_measurement_id
+                            WHERE part_id = '''+"'"+str(part_id)+"' ORDER BY parameters_pressfit_id DESC LIMIT 4")
+        results =pressfitJson.fetchall()
+        for x in results:
+            pressfit.append(x)
+                
+        return pressfit
+    
+    except mariadb.Error as e:
+        # print(f"Error en pressfit_data2: {e}")
+        return []
+
+    finally:
+        pressfitJson.close()
+    
+def electrical_data2(part_id):
+    electrical = []
+    try:
+        electricalJson = conn.cursor()
+        electricalJson.execute('''SELECT electrical_measurement.name, value, low_limit, high_limit, data_type, unit, result, compoperator, test_time, metadata, description, parameters_electrical.electrical_measurement_id FROM parameters_electrical 
+                            inner JOIN data_tracking_griffin.electrical_measurement ON electrical_measurement.electrical_measurement_id = parameters_electrical.electrical_measurement_id
+                            WHERE part_id = '''+"'"+str(part_id)+"' ORDER BY parameters_electrical_id DESC LIMIT 7")
+        results =electricalJson.fetchall()
+        for x in results:
+            electrical.append(x)
+            
+        return electrical
+    except mariadb.Error as e:
+        # print(f"Error en pressfit_data2: {e}")
+        return []
+
+    finally:
+        electricalJson.close()
+
+########################################################## REGISTRO DE COMPONENTES ####################################################
+def component_store(component_name,descripcion,parte):
+    try:
+        # --- Obtener part activo ---
+        cursor = conn.cursor()
+        cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 3 AND part_number = %s ORDER BY part_id DESC LIMIT 1",(parte,))
+        part = cursor.fetchone()
+        cursor.close()
+
+        if not part:
+            # print("[ERROR] No se encontró una pieza activa.")
+            return "FAILED"
+
+        part_id = part[0]
+
+        # --- Insertar componente ---
+        cursor = conn.cursor()
+        sql = """
+            INSERT INTO component (part_id, component_name, description)
+            VALUES (?, ?, ?)
+        """
+        cursor.execute(sql, (part_id, component_name, descripcion))
+        conn.commit()
+        cursor.close()
+
+        return "PASSED"
+
+    except mariadb.Error as e:
+        # print(f"[DB ERROR] component_store(): {e}")
+        return "FAILED"
+    except Exception as e:
+        # print(f"[ERROR] component_store(): {e}")
+        return "FAILED"
+
+def parameters_continuity(element):
+    import evaluation
+
+    print(element)
+    
+    # Preparar evaluación
+    evaluacion = [element[7], element[3], element[4]]
+    compoperator = evaluation.evaluation(evaluacion)
+    
+    try:
+        # Obtener estación activa
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT station_id 
+                FROM station 
+                INNER JOIN data_tracking_griffin.type_station 
+                    ON type_station.ts_id = station.ts_id
+                WHERE station.status_id = 1
+                LIMIT 1
+            ''')
+            station = cursor.fetchone()
         
+        if not station:
+            # print("[ERROR] No hay estaciones activas.")
+            return "FAILED"
+        
+        station_id = station[0]
+
+        # Obtener part activo
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 3 AND part_number = %s ORDER BY part_id DESC",(element[9],))
+            part = cursor.fetchone()
+        
+        if not part:
+            # print("[ERROR] No se encontró una pieza activa.")
+            return "FAILED"
+        
+        part_id = part[0]
+
+        # Insertar datos en parameters_continuity
+        sql = '''
+            INSERT INTO parameters_continuity (
+                measurement_name, description, compoperator,
+                low_limit, high_limit, unit_measurement,
+                status, value, defect_code,
+                station_id, part_id, status_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        '''
+        
+        val = (
+            element[1],  # measurement_name
+            element[2],  # description
+            compoperator,
+            float(element[3]) if element[3] else 0.0,  # low_limit
+            float(element[4]) if element[4] else 0.0,  # high_limit
+            element[5],  # unit_measurement
+            element[6],  # status
+            float(element[7]) if element[7] else 0.0,  # value
+            element[8],  # defect_code
+            # element[9],  # user_id
+            station_id,
+            part_id,
+            1  # status_status_id
+        )
+        
+        # print(f"Valores a insertar: {val}")
+        
+        with conn.cursor() as cursor:
+            cursor.execute(sql, val)
+            conn.commit()
+        
+        # print("[ÉXITO] Datos insertados correctamente en parameters_continuity")
+        return "PASSED"
+        
+    except mariadb.Error as e:
+        # print(f"[DB ERROR] parameters_continuity(): {e}")
+        return "FAILED"
+    except Exception as e:
+        # print(f"[ERROR] parameters_continuity(): {e}")
+        return "FAILED"
+
+def parameters_leak(element):
+    import evaluation
+    
+    # Preparar evaluación
+    evaluacion = [element[3], element[7], element[8]]
+    compoperator = evaluation.evaluation(evaluacion)
+    test = element[9]
+    
+    try:
+        # Obtener estación activa
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT station_id 
+                FROM station 
+                INNER JOIN data_tracking_griffin.type_station 
+                    ON type_station.ts_id = station.ts_id
+                WHERE station.status_id = 1
+                LIMIT 1
+            ''')
+            station = cursor.fetchone()
+        
+        if not station:
+            # print("[ERROR] No hay estaciones activas.")
+            return "FAILED"
+        
+        station_id = station[0]
+
+        # Obtener part activo
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 3 AND part_number = %s ORDER BY part_id DESC",(element[10],))
+            part = cursor.fetchone()
+        
+        if not part:
+            return "FAILED"
+        
+        part_id = part[0]
+        
+        # Insertar datos en parameters_continuity
+        sql = '''
+            INSERT INTO parameters_leaktest (
+                measurement_name, trial_period, value,
+                result, unit, description,
+                extra1, extra2, compoperator, test, station_id, part_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        '''
+        
+        val = (
+            element[1],  # measurement_name
+            element[2],  # trial_period
+            element[3],  # value
+            element[4],  # result
+            element[5],  # unit
+            element[6],  # description
+            element[7],  # extra1
+            element[8],  # extra2
+            compoperator,#compoperator 
+            test,        #test
+            station_id,
+            part_id
+        )
+        
+        # print(f"Valores a insertar: {val}")
+        
+        with conn.cursor() as cursor:
+            cursor.execute(sql, val)
+            conn.commit()
+        
+        print("[ÉXITO] Datos insertados correctamente en parameters_leak")
+        return "PASSED"
+        
+    except mariadb.Error as e:
+        print(f"[DB ERROR] parameters_leak(): {e}")
+        # NO cierres la conexión aquí
+        return "FAILED"
+    except Exception as e:
+        # print(f"[ERROR] parameters_leak(): {e}")
+        return "FAILED"
+
+def parameters_temperature(element):
+        
+    try:
+        # Obtener estación activa
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT station_id 
+                FROM station 
+                INNER JOIN data_tracking_griffin.type_station 
+                    ON type_station.ts_id = station.ts_id
+                WHERE station.status_id = 1
+                LIMIT 1
+            ''')
+            station = cursor.fetchone()
+        
+        if not station:
+            # print("[ERROR] No hay estaciones activas.")
+            return "FAILED"
+        
+        station_id = station[0]
+
+        # Obtener part activo
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 3 AND part_number = %s ORDER BY part_id DESC",(element[10],))
+            part = cursor.fetchone()
+        
+        if not part:
+            return "FAILED"
+        
+        part_id = part[0]
+        
+        # Insertar datos en parameters_continuity
+        sql = '''
+            INSERT INTO parameters_temperature (
+                measurement_name, start_time, end_time,
+                initial_temperature, final_temperature, unit,
+                description,
+                extra1, extra2, station_id, part_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        '''
+        
+        val = (
+            element[1],  # measurement_name
+            element[2],  # start_time
+            element[3],  # end_time
+            element[4],  # initial_temperature
+            element[5],  # final_temperature
+            element[6],  # unit
+            element[7],  # description
+            element[8],  # extra1
+            element[9],  # extra2
+            station_id,
+            part_id
+        )
+        
+        # print(f"Valores a insertar: {val}")
+        
+        with conn.cursor() as cursor:
+            cursor.execute(sql, val)
+            conn.commit()
+        
+        # print("[ÉXITO] Datos insertados correctamente en parameters_temperature")
+        return "PASSED"
+        
+    except mariadb.Error as e:
+        # print(f"[DB ERROR] parameters_temperature(): {e}")
+        # NO cierres la conexión aquí
+        return "FAILED"
+    except Exception as e:
+        # print(f"[ERROR] parameters_temperature(): {e}")
+        return "FAILED"
+    
+def parameters_welding(element):
+        
+    try:
+        # Obtener estación activa
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT station_id 
+                FROM station 
+                INNER JOIN data_tracking_griffin.type_station 
+                    ON type_station.ts_id = station.ts_id
+                WHERE station.status_id = 1
+                LIMIT 1
+            ''')
+            station = cursor.fetchone()
+        
+        if not station:
+            # print("[ERROR] No hay estaciones activas.")
+            return "FAILED"
+        
+        station_id = station[0]
+
+        # Obtener part activo
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 3 AND part_number = %s ORDER BY part_id DESC",(element[8],))
+            part = cursor.fetchone()
+        
+        if not part:
+            return "FAILED"
+        
+        part_id = part[0]
+        
+        # Insertar datos en parameters_continuity
+        sql = '''
+            INSERT INTO parameters_welding (
+                measurement_name, welding_time, welding_power,
+                collapse_distance, description, result, unit, station_id, part_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        '''
+        
+        val = (
+            element[1],  # measurement_name
+            element[2],  # welding_time
+            element[3],  # welding_power
+            element[4],  # collapse_distance
+            element[7],  # description
+            element[6],  # result
+            element[5],  # unit
+            station_id,
+            part_id
+        )
+        
+        # print(f"Valores a insertar: {val}")
+        
+        with conn.cursor() as cursor:
+            cursor.execute(sql, val)
+            conn.commit()
+        
+        # print("[ÉXITO] Datos insertados correctamente en parameters_welding")
+        return "PASSED"
+        
+    except mariadb.Error as e:
+        # print(f"[DB ERROR] parameters_welding(): {e}")
+        # NO cierres la conexión aquí
+        return "FAILED"
+    except Exception as e:
+        # print(f"[ERROR] parameters_welding(): {e}")
+        return "FAILED"
+
+def parameters_heatstake(element):
+        
+    try:
+        # Obtener part activo
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 3 AND part_number = %s ORDER BY part_id DESC",(element[4],))
+            part = cursor.fetchone()
+        
+        if not part:
+            return "FAILED"
+        
+        part_id = part[0]
+        
+        # Insertar datos en parameters_continuity
+        sql = '''
+            INSERT INTO heatstake (
+                cicle_time, serial_number,
+                program_name, times_tamp, grade, description, part_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        '''
+        
+        val = (
+            element[3],  # cicle_time
+            element[4],  # serial_number
+            element[5],  # program_name
+            element[6],  # times_tamp
+            element[7],  # grade
+            element[8],  # description
+            part_id
+        )
+        
+        # print(f"Valores a insertar: {val}")
+        
+        with conn.cursor() as cursor:
+            cursor.execute(sql, val)
+            conn.commit()
+        
+        # print("[ÉXITO] Datos insertados correctamente en parameters_welding")
+        return "PASSED"
+        
+    except mariadb.Error as e:
+        # print(f"[DB ERROR] parameters_heatstake(): {e}")
+        # NO cierres la conexión aquí
+        return "FAILED"
+    except Exception as e:
+        # print(f"[ERROR] parameters_heatstake(): {e}")
+        return "FAILED"
+
+def parameters_graph(element):
+    print(element)
+    try:
+        # Obtener part activo
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 3 AND part_number = %s ORDER BY part_id DESC",(element[2],))
+            part = cursor.fetchone()
+        
+        if not part:
+            return "FAILED"
+        
+        part_id = part[0]
+        
+        # Insertar datos en parameters_continuity
+        if element[0] =="" and element[1] =="":
+            # print("[ERROR] No se proporcionó data_image.")
+            return "GENERAL_ERROR"
+        sql = '''
+            INSERT INTO graph_image (
+                part_id, data_image, description
+            ) VALUES (?, ?, ?)
+        '''
+        
+        val = (
+            part_id,
+            element[0],  # data_image
+            element[1],  # description
+        )
+        
+        # print(f"Valores a insertar: {val}")
+        
+        with conn.cursor() as cursor:
+            cursor.execute(sql, val)
+            conn.commit()
+        
+        # print("[ÉXITO] Datos insertados correctamente en parameters_welding")
+        return "PASSED"
+        
+    except mariadb.Error as e:
+        # print(f"[DB ERROR] parameters_heatstake(): {e}")
+        # NO cierres la conexión aquí
+        return "FAILED"
+    except Exception as e:
+        # print(f"[ERROR] parameters_heatstake(): {e}")
+        return "FAILED"
+
+############################################### CONFIGURADOR ####################################################
+
+
+def get_configurator_data():
+    """Obtiene los datos de configuración actuales"""
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT configurator_id, url, program_id, device, 
+                       program_password, tsp
+                FROM configurator 
+                LIMIT 1
+            """)
+            config = cursor.fetchone()
+            return config
+    except Exception as e:
+        print(f"[ERROR] get_configurator_data(): {e}")
+        return None
+    
+def update_configurator(program_name_version, machine_id, process_name, qty_components, client_id, operator, password, station):
+    try:
+        with conn.cursor() as cursor:
+            sql_update = """
+                UPDATE configurador 
+                SET `program_name_version` = ?,
+                    `machine_id` = ?, 
+                    `process_name` = ?, 
+                    `qty_components` = ?, 
+                    `client_id` = ?, 
+                    `operator` = ?, 
+                    `password` = ?, 
+                    `station` = ?
+            """
+            cursor.execute(sql_update, (program_name_version, machine_id, process_name, qty_components, client_id, operator, password, station))
+            
+            if cursor.rowcount == 0:
+                cursor.execute("SELECT COUNT(*) FROM configurador")
+                if cursor.fetchone()[0] == 0:
+                    sql_insert = """
+                        INSERT INTO configurador (
+                            `program_name_version`, `machine_id`, `process_name`, 
+                            `qty_components`, `client_id`, `operator`, `password`, `station`
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """
+                    cursor.execute(sql_insert, (program_name_version, machine_id, process_name, qty_components, client_id, operator, password, station))
+            
+            conn.commit()
+            return True
+            
+    except Exception as e:
+        conn.rollback()
+        # Lanzamos el error hacia la interfaz gráfica para que aparezca en pantalla
+        raise Exception(f"Fallo en Base de Datos: {e}")
+    
+def update_export_status(file_type, status):
+    """Actualiza el estado de exportación para CSV, JSON o XML"""
+    try:
+        # Mapeo de tipos de archivo a key
+        file_key_map = {
+            'CSV': 'CSV_EXPORT',
+            'JSON': 'JSON_EXPORT', 
+            'XML': 'XML_EXPORT'
+        }
+        
+        file_key = file_key_map.get(file_type.upper())
+        if not file_key:
+            print(f"[ERROR] Tipo de archivo no válido: {file_type}")
+            return False
+        
+        # status: 1 = enabled, 2 = disabled
+        with conn.cursor() as cursor:
+            # Verificar si existe el registro por key
+            cursor.execute(
+                "SELECT export_file_id FROM export_file WHERE `key` = ?", 
+                (file_key,)
+            )
+            existing = cursor.fetchone()
+            
+            if existing:
+                # Actualizar registro existente
+                sql = """
+                    UPDATE export_file 
+                    SET status_id = ?, name = ?
+                    WHERE export_file_id = ?
+                """
+                cursor.execute(sql, (status, file_type, existing[0]))
+            else:
+                # Insertar nuevo registro
+                sql = """
+                    INSERT INTO export_file (`key`, name, status_id) 
+                    VALUES (?, ?, ?)
+                """
+                cursor.execute(sql, (file_key, file_type, status))
+            
+            conn.commit()
+            return True
+    except Exception as e:
+        print(f"[ERROR] update_export_status(): {e}")
+        return False
+
+def get_export_status():
+    """Obtiene el estado actual de los checkboxes CSV, JSON, XML - versión alternativa"""
+    try:
+        with conn.cursor() as cursor:
+            # Obtener todos los registros
+            cursor.execute("SELECT name, status_id FROM export_file")
+            all_rows = cursor.fetchall()
+            print(f"[DEBUG] Todas las filas en export_file: {all_rows}")
+            
+            # Filtrar y normalizar
+            status_dict = {'CSV': 2, 'JSON': 2, 'XML': 2}
+            
+            for name, status in all_rows:
+                if name:
+                    name_upper = name.upper().strip()
+                    if name_upper == 'CSV':
+                        status_dict['CSV'] = status
+                    elif name_upper == 'JSON':
+                        status_dict['JSON'] = status
+                    elif name_upper == 'XML':
+                        status_dict['XML'] = status
+            
+            print(f"[DEBUG] Estado final: {status_dict}")
+            return status_dict
+            
+    except Exception as e:
+        print(f"[ERROR] get_export_status(): {e}")
+        return {'CSV': 2, 'JSON': 2, 'XML': 2}
+
+def get_enabled_export_formats():
+    """Obtiene los formatos de exportación habilitados (status_id = 1)"""
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT name 
+                FROM export_file 
+                WHERE status_id = 1 
+                AND `key` IN ('CSV_EXPORT', 'JSON_EXPORT', 'XML_EXPORT')
+                ORDER BY FIELD(name, 'CSV', 'JSON', 'XML')
+            """)
+            
+            results = cursor.fetchall()
+            return [result[0].upper() for result in results]
+    except Exception as e:
+        print(f"[ERROR] get_enabled_export_formats(): {e}")
+        return []
+
+def initialize_export_file_table():
+    """Inicializa la tabla export_file con los tipos de archivo si no existen"""
+    try:
+        with conn.cursor() as cursor:
+            # Verificar si ya existen los registros
+            cursor.execute("""
+                SELECT COUNT(*) FROM export_file 
+                WHERE `key` IN ('CSV_EXPORT', 'JSON_EXPORT', 'XML_EXPORT')
+            """)
+            count = cursor.fetchone()[0]
+            
+            if count < 3:
+                # Insertar los tipos faltantes
+                file_types = [
+                    ('CSV_EXPORT', 'CSV', 2),  # disabled por defecto
+                    ('JSON_EXPORT', 'JSON', 2),  # disabled por defecto
+                    ('XML_EXPORT', 'XML', 2)  # disabled por defecto
+                ]
+                
+                for file_key, name, status in file_types:
+                    cursor.execute("""
+                        INSERT IGNORE INTO export_file (`key`, name, status_id)
+                        VALUES (?, ?, ?)
+                    """, (file_key, name, status))
+                
+                conn.commit()
+                print("[INFO] Tabla export_file inicializada")
+                return True
+        return False
+    except Exception as e:
+        print(f"[ERROR] initialize_export_file_table(): {e}")
+        return False
+
+#################################################################################################################
+################################################ EXPORT FILE ####################################################
+
+# Añade estas funciones al archivo conexion.py
+
+def get_data_for_export():
+    """Obtiene datos de ejemplo para exportación"""
+    try:
+        with conn.cursor(dictionary=True) as cursor:
+            # Ejemplo: Obtener datos de partes recientes
+            cursor.execute("""
+                SELECT 
+                    p.part_id,
+                    p.part_number,
+                    p.model_id,
+                    m.name as model_name,
+                    p.status_id,
+                    DATE(p.created_at) as created_date
+                FROM part p
+                LEFT JOIN model m ON p.model_id = m.model_id
+                ORDER BY p.part_id DESC
+                LIMIT 100
+            """)
+            
+            return cursor.fetchall()
+    except Exception as e:
+        print(f"[ERROR] get_data_for_export(): {e}")
+        return []
+
+def export_all_enabled_formats():
+    """Exporta datos a todos los formatos habilitados"""
+    try:
+        # Obtener formatos habilitados
+        enabled_formats = get_enabled_export_formats()
+        
+        if not enabled_formats:
+            print("[INFO] No hay formatos de exportación habilitados")
+            return False
+        
+        # Obtener datos para exportar
+        data = get_data_for_export()
+        
+        if not data:
+            print("[INFO] No hay datos para exportar")
+            return False
+        
+        results = []
+        for file_type in enabled_formats:
+            success = export_data_to_format(file_type, data)
+            results.append((file_type, success))
+        
+        # Retornar resultados
+        return all(success for _, success in results)
+        
+    except Exception as e:
+        print(f"[ERROR] export_all_enabled_formats(): {e}")
+        return False
+
+def export_data_to_format(file_type, data):
+    """Exporta datos al formato especificado"""
+    try:
+        formats = {
+            'CSV': export_to_csv,
+            'JSON': export_to_json,
+            'XML': export_to_xml
+        }
+        
+        if file_type in formats:
+            return formats[file_type](data)
+        else:
+            print(f"[ERROR] Formato no soportado: {file_type}")
+            return False
+    except Exception as e:
+        print(f"[ERROR] export_data_to_format(): {e}")
+        return False
+
+def export_to_csv(data):
+    """Exporta datos a CSV"""
+    try:
+        import csv
+        import os
+        from datetime import datetime
+        
+        # Crear directorio de exportación si no existe
+        export_dir = "exports"
+        if not os.path.exists(export_dir):
+            os.makedirs(export_dir)
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = os.path.join(export_dir, f"export_{timestamp}.csv")
+        
+        with open(filename, 'w', newline='', encoding='utf-8-sig') as csvfile:
+            if data and len(data) > 0:
+                # Asumiendo que data es una lista de diccionarios
+                if isinstance(data[0], dict):
+                    fieldnames = data[0].keys()
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(data)
+                else:
+                    # Si es lista de tuplas
+                    writer = csv.writer(csvfile)
+                    writer.writerows(data)
+        
+        print(f"[INFO] Datos exportados a {filename}")
+        return True
+    except Exception as e:
+        print(f"[ERROR] export_to_csv(): {e}")
+        return False
+
+def export_to_json(data):
+    """Exporta datos a JSON"""
+    try:
+        import json
+        import os
+        from datetime import datetime
+        
+        # Crear directorio de exportación si no existe
+        export_dir = "exports"
+        if not os.path.exists(export_dir):
+            os.makedirs(export_dir)
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = os.path.join(export_dir, f"export_{timestamp}.json")
+        
+        with open(filename, 'w', encoding='utf-8') as jsonfile:
+            json.dump(data, jsonfile, indent=2, ensure_ascii=False)
+        
+        print(f"[INFO] Datos exportados a {filename}")
+        return True
+    except Exception as e:
+        print(f"[ERROR] export_to_json(): {e}")
+        return False
+
+def export_to_xml(data):
+    """Exporta datos a XML"""
+    try:
+        import xml.etree.ElementTree as ET
+        from xml.dom import minidom
+        import os
+        from datetime import datetime
+        
+        # Crear directorio de exportación si no existe
+        export_dir = "exports"
+        if not os.path.exists(export_dir):
+            os.makedirs(export_dir)
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = os.path.join(export_dir, f"export_{timestamp}.xml")
+        
+        # Crear elemento raíz
+        root = ET.Element("export_data")
+        
+        if data and len(data) > 0:
+            # Asumiendo que data es una lista de diccionarios
+            for item in data:
+                record = ET.SubElement(root, "record")
+                for key, value in item.items():
+                    field = ET.SubElement(record, str(key))
+                    field.text = str(value) if value is not None else ""
+        
+        # Formatear XML
+        xml_str = ET.tostring(root, encoding='utf-8')
+        xml_pretty = minidom.parseString(xml_str).toprettyxml(indent="  ")
+        
+        with open(filename, 'w', encoding='utf-8') as xmlfile:
+            xmlfile.write(xml_pretty)
+        
+        print(f"[INFO] Datos exportados a {filename}")
+        return True
+    except Exception as e:
+        print(f"[ERROR] export_to_xml(): {e}")
+        return False
+
+################################################################# Números de series ###########################################################################
+
+def get_part_numbers(numero):
+    
+    # Obtener part_id
+    cursor = conn.cursor()
+    cursor.execute("SELECT serial_number_id, data FROM serial_number WHERE status_serial_number_id = 2 AND data = %s",(numero,))
+    part = cursor.fetchone()
+    cursor.close()
+
+    if not part:
+        cur = conn.cursor()
+        sql = '''
+            INSERT INTO serial_number
+            (data, status_serial_number_id)
+            VALUES (%s, %s)
+        '''
+        vals = (numero, 2)
+
+        try:
+            cur.execute(sql, vals)
+            conn.commit()
+        except Exception as e:
+            print("Error inserting pressfit parameter:", e)
+            return "FAILED"
+        
+        return numero
+    
+    return "PASSED"
+
+def return_part_serial_number (numero):
+    cursor = conn.cursor()
+    sql = "DELETE FROM serial_number WHERE data = ?"
+    cursor.execute(sql, (numero,))
+    conn.commit()
+    cursor.close()
+    
+################################################################# Configurador ###########################################################################
+def configurador():
+    try:
+        conn.commit() 
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT machine_id, process_name, operator, station, 
+                   program_name_version, qty_components, client_id, password, shop_order, model_id,
+                   print_macro, location, shop_flor
+            FROM configurador 
+            LIMIT 1
+        """)
+        datos_config = cursor.fetchone()
+        cursor.close()
+
+        # if not datos_config:
+        #     print("[INFO] La tabla configurador está vacía. Esperando la primera inserción.")
+        #     return "No_data"
+            
+        return datos_config
+    except Exception as e:
+        print(f"[ERROR] Error en función configurador(): {e}")
+        return "FAILED"
+
+################################################################# Atributos ###########################################################################
+def atributos():
+    # Obtener atributos actuales
+    try:
+        with conn.cursor() as cursor:
+            # Agregamos defect_code al final para que sea la posición 7 (índice 6)
+            cursor.execute("SELECT name, unit, upper_limit, lower_limit, value_expected, time, defect_code FROM attribute")
+            results = cursor.fetchall()
+            return [result for result in results]
+    except Exception as e:
+        print("[ERROR] No se encontraron atributos.")
+        return []
+    
+################################################################# URLs ###########################################################################
+
+def get_urls():
+    """Obtener todas las URLs de la tabla url_data - Estructura actualizada"""    
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT
+                    name,
+                    url_data
+                FROM url_data 
+                WHERE tc_id = 1
+                ORDER BY url_data_id ASC
+            ''')
+            urls = cursor.fetchall()
+            
+            # Convertir a diccionario para fácil acceso
+            url_dict = {}
+            for name, url in urls:
+                url_dict[name] = url
+            # print(url_dict['SHOP ORDER'])
+            return url_dict
+            
+    except Exception as e:
+        print(f"Error obteniendo URLs: {e}")
+        return {}
+
+################################################################# Type Test ###########################################################################
+
+def type_test():
+    # Obtener atributos actuales
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT test_type_id, name FROM test_type WHERE status_id = 1")
+            
+            results = cursor.fetchall()
+            # print([result for result in results])
+            # return [result for result in results]
+            # return [result[0].upper() for result in results]
+            return results
+    except Exception as e:
+        print("[ERROR] No se encontraron atributos.")
+        return []
+
+################################################################# Heatstake ###########################################################################
+
+def heatstake_info(serial_number):
+    # Obtener atributos actuales
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 2 AND part_number = %s ORDER BY part_id DESC LIMIT 1",(serial_number,))
+            part = cursor.fetchone()
+        
+        if not part:
+            return "FAILED"
+        
+        part_id = part[0]
+
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT part_id, cicle_time, serial_number, program_name, times_tamp, grade, description FROM heatstake WHERE part_id = %s",(part_id,))
+            
+            results = cursor.fetchall()
+            # print([result for result in results])
+            # return [result for result in results]
+            # return [result[0].upper() for result in results]
+            return results
+    except Exception as e:
+        print("[ERROR] No se encontraron atributos.")
+        return []
+
+################################################################# Obtener Parte ###########################################################################
+
+def obtener_parte(serial_number):
+     # Obtener part_id
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT part_id, part_number, model_id, create_registration FROM part WHERE part_number = %s ORDER BY part_id DESC LIMIT 1",(serial_number,))
+            part = cursor.fetchone()
+        
+        if not part:
+            return "FAILED"
+        
+        
+        return part
+    except Exception as e:
+        print("[ERROR] No se encontraron atributos.")
+        return []
+    
+################################################################# Obtener graph ###########################################################################
+
+def obtener_image(serial_number):
+    # Obtener part_id
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 2 AND part_number = %s ORDER BY part_id DESC LIMIT 1",(serial_number,))
+            part = cursor.fetchone()
+        
+        if not part:
+            return "FAILED"
+        
+        part_id = part[0]
+
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT part_id, data_image, description FROM graph_image WHERE part_id = %s",(part_id,))
+            
+            results = cursor.fetchall()
+            return results
+    except Exception as e:
+        print("[ERROR] No se encontraron atributos.")
+        return []
+#################################################################################################################
+
+################################################################# Obtener contadores de seriales ###########################################################################
+def seriales_procesados():
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(DISTINCT part_id) FROM part WHERE status_id = 2")
+            count = cursor.fetchone()[0]
+            return count
+    except Exception as e:
+        print("[ERROR] No se encontraron atributos.")
+        return 0
+    
+def seriales_pendientes():
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(DISTINCT part_id) FROM part WHERE status_id = 3")
+            count = cursor.fetchone()[0]
+            return count
+    except Exception as e:
+        print("[ERROR] No se encontraron atributos.")
+        return 0
+
+def unidades_falladas():
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(DISTINCT part_id) FROM duration WHERE taskresult = 'FAILED'")
+            count = cursor.fetchone()[0]
+            return count
+    except Exception as e:
+        print("[ERROR] No se encontraron atributos.")
+        return 0
+    
+def multiplo_series():
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT CASE WHEN COUNT(DISTINCT part_id) % 100 = 0 AND COUNT(DISTINCT part_id) > 0 THEN 'multiplo' ELSE 'no_multiplo' END AS tipo_conteo FROM part;")
+            count = cursor.fetchone()[0]
+            return count
+    except Exception as e:
+        print("[ERROR] No se encontraron atributos.")
+        return 0
+################################################################# Conduit ST20 ###########################################################################
+
+
+def get_expiration_time():
+    """Obtiene todos los registros de la tabla expiration_time para construir los commands del Conduit."""
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT process_name, defect_code, minute_duration, move_loc FROM expiration_time")
+            results = cursor.fetchall()
+        return results  # lista de (process_name, defect_code, minute_duration, move_loc)
+    except Exception as e:
+        print(f"[ERROR] get_expiration_time: {e}")
+        return []
+
+
+#Expiration time:
+def obtener_datos_expiration():
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM configurador")
+        row_config = cursor.fetchone()
+
+        cursor.execute("SELECT * FROM expiration_time")
+        row_expiration = cursor.fetchone()
+
+        if row_config and row_expiration:
+            datos = {
+                "workStation_ID": row_config[8],              # De configurador
+                "Client_id": row_config[5],                   # De configurador
+                "operator_id": row_config[6],                 # De configurador
+                "process_name_expiration": row_expiration[1], 
+                "time_defect_code_1": row_expiration[2],      # De expiration_time
+                "minute_duration_1": row_expiration[3],       # De expiration_time
+                "move_to_loc_1": row_expiration[4]            # De expiration_time
+            }
+            return datos
+        else:
+            print("No se encontraron datos en configurador o expiration_time.")
+            return None
+    except Exception as e:
+        print(f"Error al consultar base de datos en obtener_datos_expiration: {e}")
+        return None
+    
+############################################################################################################################################################
+
+def get_expiration_time():
+    """Obtiene todos los registros de expiration_time para construir los commands del Conduit."""
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT process_name, defect_code, minute_duration, move_loc FROM expiration_time")
+            results = cursor.fetchall()
+        return results  # lista de (process_name, defect_code, minute_duration, move_loc)
+    except Exception as e:
+        print(f"[ERROR] get_expiration_time: {e}")
+        return []
+
+def select_expiration_time():
+    """Obtiene todos los registros de expiration_time incluyendo el ID (para CRUD)."""
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT expiration_time_id, process_name, defect_code, minute_duration, move_loc FROM expiration_time")
+            data = cursor.fetchall()
+        return data  
+    except Exception as e:
+        print(f"[ERROR] select_expiration_time: {e}")
+        return []
+
+def insert_expiration_time(process_name, defect_code, minute_duration, move_loc):
+    """Inserta un nuevo registro en expiration_time. Retorna el ID generado."""
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO expiration_time (process_name, defect_code, minute_duration, move_loc) VALUES (%s, %s, %s, %s)",
+                (process_name, defect_code, minute_duration, move_loc)
+            )
+            conn.commit()
+            return cursor.lastrowid
+    except Exception as e:
+        print(f"[ERROR] insert_expiration_time: {e}")
+        return None
+
+def update_expiration_time(expiration_time_id, process_name, defect_code, minute_duration, move_loc):
+    """Actualiza un registro existente en expiration_time por ID."""
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "UPDATE expiration_time SET process_name=%s, defect_code=%s, minute_duration=%s, move_loc=%s WHERE expiration_time_id=%s",
+                (process_name, defect_code, minute_duration, move_loc, expiration_time_id)
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"[ERROR] update_expiration_time: {e}")
+
+def delete_expiration_time(expiration_time_id):
+    """Elimina un registro de expiration_time por ID."""
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM expiration_time WHERE expiration_time_id=%s", (expiration_time_id,))
+            conn.commit()
+    except Exception as e:
+        print(f"[ERROR] delete_expiration_time: {e}")
+
+
+# ATTRIBUTES ST20
+
+def select_attributes_st20():
+    """SELECT para la vista ST20: id, name, unit, upper_limit, lower_limit, defect_code."""
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT attribute_id, name, unit, upper_limit, lower_limit, defect_code FROM attribute"
+    )
+    data = cursor.fetchall()
+    cursor.close()
+    return data  
+
+def insert_attribute_st20(name, unit, upper_limit, lower_limit, defect_code):
+    """INSERT para la vista ST20. Retorna el ID generado."""
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO attribute (name, unit, upper_limit, lower_limit, defect_code) VALUES (%s, %s, %s, %s, %s)",
+        (name, unit, upper_limit, lower_limit, defect_code)
+    )
+    conn.commit()
+    attribute_id = cursor.lastrowid
+    cursor.close()
+    return attribute_id
+
+def update_attribute_st20(attribute_id, name, unit, upper_limit, lower_limit, defect_code):
+    """UPDATE para la vista ST20."""
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE attribute SET name=%s, unit=%s, upper_limit=%s, lower_limit=%s, defect_code=%s WHERE attribute_id=%s",
+        (name, unit, upper_limit, lower_limit, defect_code, attribute_id)
+    )
+    conn.commit()
+    cursor.close()
+
+#########################################TRACCEABILITY AACMBIOS###############################################################################
+
+def verificar_cantidad_componentes(serial_padre):
+    """
+    Cuenta los componentes guardados para la pieza actual y los compara con qty_components.
+    Retorna True si está COMPLETO (>=), False si está INCOMPLETO (<).
+    """
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT qty_components FROM configurador LIMIT 1")
+        config = cursor.fetchone()
+
+        if not config:
+            cursor.close()
+            return False
+        
+        qty_requerida = int(config[0]) if str(config[0]).isdigit() else 0
+        cursor.execute("SELECT part_id FROM part WHERE part_number = ? ORDER BY part_id DESC LIMIT 1", (serial_padre,))
+        part = cursor.fetchone()
+
+        if not part:
+            cursor.close()
+            return False
+        part_id = part[0]
+
+        cursor.execute("SELECT COUNT(*) FROM component WHERE part_id = ?", (part_id,))
+        cantidad_actual = cursor.fetchone()[0]
+        cursor.close()
+
+        print(f"[VERIFY] Escaneados: {cantidad_actual} / Requeridos: {qty_requerida}")
+        return cantidad_actual >= qty_requerida
+
+    except mariadb.Error as e:
+        print(f"[DB ERROR] verificar_cantidad_componentes: {e}")
+        return False
+    except Exception as e:
+        print(f"[ERROR] verificar_cantidad_componentes: {e}")
+        return False
+    
+
+#CONFIGURADOR ST50-80
+def configuradorst50_80():
+    try:
+        conn = get_connection() 
+        cursor = conn.cursor()  
+        sql = """
+            SELECT machine_id, operator, model_id, process_name, shop_order 
+            FROM configurador 
+            LIMIT 1
+        """
+        cursor.execute(sql)
+        registro = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if registro:
+            return registro
+        else:
+            return ("", "", "", "", "")
+            
+    except Exception as e:
+        print(f"Error en conexion.configuradorst50_80: {e}")
+        return "FAILED"
+
+def update_configuratorst50_80(machine_id, operator, model_id, process_name, shop_order):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            UPDATE configurador 
+            SET machine_id = ?, 
+                operator = ?, 
+                model_id = ?, 
+                process_name = ?, 
+                shop_order = ?
+        """
+        cursor.execute(sql, (machine_id, operator, model_id, process_name, shop_order))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Fallo en Base de Datos: {e}")
+    
+def insert_configuratorst50_80(machine_id, operator, model_id, process_name, shop_order):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            INSERT INTO configurador (machine_id, operator, model_id, process_name, shop_order)
+            VALUES (?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (machine_id, operator, model_id, process_name, shop_order))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al insertar configuración inicial: {e}")
+
+# ===================== Configurador items ST40 (Tabla 2.2 - 9 campos) =====================
+def configurador_st40():
+    """Lee los 9 items de configuración de ST40 (Tabla 2.2 del PDF).
+       Retorna: (machine_id, client_id, operator, password,
+                 model_id, process_name, print_macro, location, shop_flor)"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            SELECT machine_id, client_id, operator, password,
+                   model_id, process_name, print_macro, location, shop_flor
+            FROM configurador
+            LIMIT 1
+        """
+        cursor.execute(sql)
+        registro = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if registro:
+            return registro
+        else:
+            return ("", "", "", "", "", "", "", "", "")
+    except Exception as e:
+        print(f"Error en conexion.configurador_st40: {e}")
+        return "FAILED"
+
+def update_configurador_st40(machine_id, client_id, operator, password,
+                             model_id, process_name, print_macro, location, shop_flor):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            UPDATE configurador
+            SET machine_id = ?,
+                client_id = ?,
+                operator = ?,
+                password = ?,
+                model_id = ?,
+                process_name = ?,
+                print_macro = ?,
+                location = ?,
+                shop_flor = ?
+        """
+        cursor.execute(sql, (machine_id, client_id, operator, password,
+                             model_id, process_name, print_macro, location, shop_flor))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Fallo en Base de Datos: {e}")
+
+def insert_configurador_st40(machine_id, client_id, operator, password,
+                             model_id, process_name, print_macro, location, shop_flor):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            INSERT INTO configurador (machine_id, client_id, operator, password,
+                                      model_id, process_name, print_macro, location, shop_flor)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (machine_id, client_id, operator, password,
+                             model_id, process_name, print_macro, location, shop_flor))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al insertar configuración inicial ST40: {e}")
+
+# ===================== Configurador items ST60 (Tabla 2.2 - 5 campos) =====================
+def configurador_st60():
+    """Lee los 5 items de configuración de ST60 (Tabla 2.2 del PDF).
+       Retorna: (program_name_version, machine_id, process_name, client_id, operator)"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            SELECT program_name_version, machine_id, process_name, client_id, operator
+            FROM configurador
+            LIMIT 1
+        """
+        cursor.execute(sql)
+        registro = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if registro:
+            return registro
+        else:
+            return ("", "", "", "", "")
+    except Exception as e:
+        print(f"Error en conexion.configurador_st60: {e}")
+        return "FAILED"
+
+def contar_configurador():
+    """Devuelve el número de filas en la tabla 'configurador'.
+       Útil para decidir entre UPDATE (ya existe la fila única) o INSERT
+       (solo cuando la tabla está realmente vacía)."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM configurador")
+        total = cursor.fetchone()[0]
+        cursor.close()
+        conn.close()
+        return int(total)
+    except Exception as e:
+        print(f"Error en conexion.contar_configurador: {e}")
+        return -1
+
+def update_configurador_st60(program_name_version, machine_id, process_name, client_id, operator):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            UPDATE configurador
+            SET program_name_version = ?,
+                machine_id = ?,
+                process_name = ?,
+                client_id = ?,
+                operator = ?
+        """
+        cursor.execute(sql, (program_name_version, machine_id, process_name, client_id, operator))
+        filas = cursor.rowcount          # filas afectadas por el UPDATE
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return filas
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Fallo en Base de Datos: {e}")
+
+def insert_configurador_st60(program_name_version, machine_id, process_name, client_id, operator):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            INSERT INTO configurador (program_name_version, machine_id, process_name, client_id, operator)
+            VALUES (?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (program_name_version, machine_id, process_name, client_id, operator))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al insertar configuración inicial ST60: {e}")
+
+    
+  ####Atributos st50-80
+
+def select_attributes_st50_80():
+    """
+    NUEVA FUNCIÓN EXCLUSIVA PARA ATRIBUTOS ST50-80
+    Trae las columnas en el orden exacto para que coincidan con la interfaz.
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            SELECT attribute_id, name, unit, lower_limit, upper_limit, defect_code, defect_code_high 
+            FROM attribute
+        """
+        cursor.execute(sql)
+        registros = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        return registros
+    except Exception as e:
+        print(f"Error en select_attributes_st50_80: {e}")
+        return []
+
+def insert_attribute_st50_80(name, unit, upper_limit, lower_limit, defect_code_low, defect_code_high):
+    """
+    NUEVA FUNCIÓN EXCLUSIVA PARA ATRIBUTOS ST50-80
+    Inserta los 6 valores requeridos en la tabla 'attribute'.
+    """
+    try:
+        conn = get_connection()
+        with conn.cursor() as cursor:
+            sql = """
+                INSERT INTO attribute (name, unit, upper_limit, lower_limit, defect_code, defect_code_high)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """
+            cursor.execute(sql, (name, unit, upper_limit, lower_limit, defect_code_low, defect_code_high))
+            conn.commit()
+            return cursor.lastrowid
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Error al insertar atributo ST50-80: {e}")
+
+def update_attribute_st50_80(attribute_id, name, unit, upper_limit, lower_limit, defect_code_low, defect_code_high):
+    try:
+        conn = get_connection()
+        with conn.cursor() as cursor:
+            sql = """
+                UPDATE attribute 
+                SET name = ?, 
+                    unit = ?, 
+                    upper_limit = ?, 
+                    lower_limit = ?, 
+                    defect_code = ?, 
+                    defect_code_high = ?
+                WHERE attribute_id = ?
+            """
+            cursor.execute(sql, (name, unit, upper_limit, lower_limit, defect_code_low, defect_code_high, attribute_id))
+            conn.commit()
+            conn.close()
+            return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Error al actualizar atributo ST50-80: {e}")
+
+
+#Configurador urls
+def select_api_configs_st50_80():
+
+    try:
+        conn   = get_connection()
+        cursor = conn.cursor()
+        sql = "SELECT url_data_id, tc_id, name, url_data FROM url_data ORDER BY url_data_id ASC"
+        cursor.execute(sql)
+        rows = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        return rows
+    except Exception as e:
+        print(f"Error en select_api_configs_st50_80: {e}")
+        return "FAILED"
+
+def update_api_by_name_st50_80(api_name, nueva_url):
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            UPDATE url_data 
+            SET url_data = ? 
+            WHERE name = ?
+        """
+        cursor.execute(sql, (nueva_url, api_name))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al actualizar URL de la API {api_name}: {e}")
+    
+def insert_api_by_name_st50_80(api_name, url_data):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            INSERT INTO url_data (name, url_data)
+            VALUES (?, ?)
+        """
+        cursor.execute(sql, (api_name, url_data))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al registrar la API {api_name}: {e}")
+    
+
+#CONFIGURADOR SHOP ORDER ST40
+def configurador_shop_order_st40():
+    try:
+        conn.commit() 
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT shop_order, qty_components
+            FROM configurador 
+            LIMIT 1
+        """)
+        datos_config = cursor.fetchone()
+        cursor.close()
+
+        # if not datos_config:
+        #     print("[INFO] La tabla configurador está vacía. Esperando la primera inserción.")
+        #     return "No_data"
+            
+        return datos_config
+    except Exception as e:
+        print(f"[ERROR] Error en función configurador(): {e}")
+        return "FAILED"
+
+def update_configurador_shop_order_st40(shop_order, qty_components, conn):
+    try:
+        with conn.cursor() as cursor:
+            sql_update = """
+                UPDATE configurador 
+                SET `shop_order` = ?,
+                    `qty_components` = ?
+            """
+            cursor.execute(sql_update, (shop_order, qty_components))
+            
+            # Si no se actualizó nada, revisamos si la tabla está vacía para insertar
+            if cursor.rowcount == 0:
+                cursor.execute("SELECT COUNT(*) FROM configurador")
+                if cursor.fetchone()[0] == 0:
+                    sql_insert = """
+                        INSERT INTO configurador (
+                            `shop_order`, `qty_components`
+                        ) VALUES (?, ?)
+                    """
+                    cursor.execute(sql_insert, (shop_order, qty_components))
+            
+            conn.commit()
+            return True
+            
+    except Exception as e:
+        conn.rollback()
+        # Lanzamos el error hacia la interfaz gráfica para que aparezca en pantalla
+        raise Exception(f"Fallo en Base de Datos: {e}")
+    
+def inspection_data4(part_id):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    parameters_inspection.inspection_measurement_id, 
+                    value, 
+                    low_limit, 
+                    high_limit, 
+                    data_type, 
+                    unit, 
+                    result, 
+                    compoperator, 
+                    test_time, 
+                    metadata, 
+                    description, 
+                    inspection_measurement.name 
+                FROM parameters_inspection 
+                INNER JOIN data_tracking_griffin.inspection_measurement 
+                    ON inspection_measurement.inspection_measurement_id = parameters_inspection.inspection_measurement_id
+                WHERE part_id = %s
+                ORDER BY parameters_inspection_id DESC
+                LIMIT 1
+            ''', (part_id,))
+            return cursor.fetchall()
+    except Exception as e:
+        # print(f"[ERROR] inspection_data(): {e}")
+        return []
+
+def pressfit_data4(part_id):
+    pressfit = []
+    conn = get_connection()
+    if conn is None:
+        return pressfit
+
+    try:
+        with conn.cursor() as cursor:
+            sql = '''
+                SELECT t.*
+                FROM parameters_pressfit t
+                LEFT JOIN (
+                    -- Último registro por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(parameters_pressfit_id) AS ultimo_id
+                    FROM parameters_pressfit
+                    GROUP BY measurement_name
+                ) u 
+                    ON u.measurement_name = t.measurement_name
+                LEFT JOIN parameters_pressfit ult
+                    ON ult.measurement_name = u.measurement_name
+                AND ult.parameters_pressfit_id = u.ultimo_id
+                LEFT JOIN (
+                    -- FAIL con mayor número de reintentos por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(reintentos) AS max_reintento
+                    FROM parameters_pressfit
+                    WHERE status = 'FAIL'
+                    AND reintentos IS NOT NULL
+                    AND reintentos > 0
+                    GROUP BY measurement_name
+                ) f 
+                    ON f.measurement_name = t.measurement_name
+                WHERE
+                (
+                    -- 1) Siempre mostrar PASS
+                    t.status = 'PASS'
+
+                    -- 2) FAIL sin reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND (t.reintentos IS NULL OR t.reintentos = 0)
+                        AND ult.status <> 'PASS'
+                    )
+
+                    -- 3) FAIL con el mayor número de reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND t.reintentos = f.max_reintento
+                        AND ult.status <> 'PASS'
+                    )
+                )
+                AND t.part_id = %s
+                ORDER BY t.measurement_name, t.parameters_pressfit_id;
+            '''
+            cursor.execute(sql, (part_id,))
+            pressfit = cursor.fetchall()
+    except Exception as e:
+        print(f"Error fetching pressfit data: {e}")
+    finally:
+        conn.close()
+
     return pressfit
+
+def continuity_data4(part_id):
+    continuity = []
+    conn = get_connection()
+    if conn is None:
+        return continuity
+
+    try:
+        with conn.cursor() as cursor:
+            sql = '''
+                SELECT t.*
+                FROM parameters_continuty t
+                LEFT JOIN (
+                    -- Último registro por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(parameters_continuity_id) AS ultimo_id
+                    FROM parameters_continuty
+                    GROUP BY measurement_name
+                ) u 
+                    ON u.measurement_name = t.measurement_name
+                LEFT JOIN parameters_continuty ult
+                    ON ult.measurement_name = u.measurement_name
+                AND ult.parameters_continuity_id = u.ultimo_id
+                LEFT JOIN (
+                    -- FAIL con mayor número de reintentos por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(reintentos) AS max_reintento
+                    FROM parameters_continuty
+                    WHERE status = 'FAIL'
+                    AND reintentos IS NOT NULL
+                    AND reintentos > 0
+                    GROUP BY measurement_name
+                ) f 
+                    ON f.measurement_name = t.measurement_name
+                WHERE
+                (
+                    -- 1) Siempre mostrar PASS
+                    t.status = 'PASS'
+
+                    -- 2) FAIL sin reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND (t.reintentos IS NULL OR t.reintentos = 0)
+                        AND ult.status <> 'PASS'
+                    )
+
+                    -- 3) FAIL con el mayor número de reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND t.reintentos = f.max_reintento
+                        AND ult.status <> 'PASS'
+                    )
+                )
+                AND t.part_id = %s
+                AND t.status_status_id = 1
+                ORDER BY t.measurement_name, t.parameters_continuity_id;
+            '''
+            cursor.execute(sql, (part_id,))
+            continuity = cursor.fetchall()
+    except Exception as e:
+        print(f"Error fetching pressfit data: {e}")
+    finally:
+        conn.close()
+
+    return continuity
+
+def electrical_data4(part_id):
+    electrical = []
+    conn = get_connection()
+    if conn is None:
+        return electrical
+
+    try:
+        with conn.cursor() as cursor:
+            sql = '''
+                SELECT t.*
+                FROM parameters_electrical t
+                LEFT JOIN (
+                    -- Último registro por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(parameters_electrical_id) AS ultimo_id
+                    FROM parameters_electrical
+                    GROUP BY measurement_name
+                ) u 
+                    ON u.measurement_name = t.measurement_name
+                LEFT JOIN parameters_electrical ult
+                    ON ult.measurement_name = u.measurement_name
+                AND ult.parameters_electrical_id = u.ultimo_id
+                LEFT JOIN (
+                    -- FAIL con mayor número de reintentos por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(reintentos) AS max_reintento
+                    FROM parameters_electrical
+                    WHERE status = 'FAIL'
+                    AND reintentos IS NOT NULL
+                    AND reintentos > 0
+                    GROUP BY measurement_name
+                ) f 
+                    ON f.measurement_name = t.measurement_name
+                WHERE
+                (
+                    -- 1) Siempre mostrar PASS
+                    t.status = 'PASS'
+
+                    -- 2) FAIL sin reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND (t.reintentos IS NULL OR t.reintentos = 0)
+                        AND ult.status <> 'PASS'
+                    )
+
+                    -- 3) FAIL con el mayor número de reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND t.reintentos = f.max_reintento
+                        AND ult.status <> 'PASS'
+                    )
+                )
+                AND t.part_id = %s
+                AND t.status_id = 1
+                ORDER BY t.measurement_name, t.parameters_electrical_id;
+            '''
+            cursor.execute(sql, (part_id,))
+            electrical = cursor.fetchall()
+    except Exception as e:
+        print(f"Error fetching pressfit data: {e}")
+    finally:
+        conn.close()
+
+    return electrical
+
+def screwing_data4(part_id):
+    screwing = []
+    conn = get_connection()
+    if conn is None:
+        return screwing
+
+    try:
+        with conn.cursor() as cursor:
+            sql = '''
+                SELECT t.*
+                FROM parameters_screwing t
+                LEFT JOIN (
+                    -- Último registro por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(parameters_screwing_id) AS ultimo_id
+                    FROM parameters_screwing
+                    GROUP BY measurement_name
+                ) u 
+                    ON u.measurement_name = t.measurement_name
+                LEFT JOIN parameters_screwing ult
+                    ON ult.measurement_name = u.measurement_name
+                AND ult.parameters_screwing_id = u.ultimo_id
+                LEFT JOIN (
+                    -- FAIL con mayor número de reintentos por measurement_name
+                    SELECT
+                        measurement_name,
+                        MAX(reintentos) AS max_reintento
+                    FROM parameters_screwing
+                    WHERE status = 'FAIL'
+                    AND reintentos IS NOT NULL
+                    AND reintentos > 0
+                    GROUP BY measurement_name
+                ) f 
+                    ON f.measurement_name = t.measurement_name
+                WHERE
+                (
+                    -- 1) Siempre mostrar PASS
+                    t.status = 'PASS'
+
+                    -- 2) FAIL sin reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND (t.reintentos IS NULL OR t.reintentos = 0)
+                        AND ult.status <> 'PASS'
+                    )
+
+                    -- 3) FAIL con el mayor número de reintentos (solo si el último NO es PASS)
+                    OR (
+                        t.status = 'FAIL'
+                        AND t.reintentos = f.max_reintento
+                        AND ult.status <> 'PASS'
+                    )
+                )
+                AND t.part_id = %s
+                AND t.status_id = 1
+                ORDER BY t.measurement_name, t.parameters_screwing_id;
+            '''
+            cursor.execute(sql, (part_id,))
+            screwing = cursor.fetchall()
+    except Exception as e:
+        print(f"Error fetching screwing data: {e}")
+    finally:
+        conn.close()
+
+    return screwing
+
+#===================== Configurador items ST100 (Tabla 2.2 - 6 campos) =====================
+def configurador_st100():
+    """Lee los 6 items de configuración de ST100 (Tabla 2.2 del PDF).
+       Retorna: (machine_id, client_id, operator, password, model_id, process_name)"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            SELECT machine_id, client_id, operator, password, model_id, process_name
+            FROM configurador
+            LIMIT 1
+        """
+        cursor.execute(sql)
+        registro = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if registro:
+            return registro
+        else:
+            return ("", "", "", "", "", "")
+    except Exception as e:
+        print(f"Error en conexion.configurador_st100: {e}")
+        return "FAILED"
+
+def contar_configurador():
+    """Devuelve el número de filas en la tabla 'configurador'.
+       Útil para decidir entre UPDATE (ya existe la fila única) o INSERT
+       (solo cuando la tabla está realmente vacía)."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM configurador")
+        total = cursor.fetchone()[0]
+        cursor.close()
+        conn.close()
+        return int(total)
+    except Exception as e:
+        print(f"Error en conexion.contar_configurador: {e}")
+        return -1
+
+def update_configurador_st100(machine_id, client_id, operator, password, model_id, process_name):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            UPDATE configurador
+            SET machine_id = ?,
+                client_id = ?,
+                operator = ?,
+                password = ?,
+                model_id = ?,
+                process_name = ?
+        """
+        cursor.execute(sql, (machine_id, client_id, operator, password, model_id, process_name))
+        filas = cursor.rowcount          # filas afectadas por el UPDATE
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return filas
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Fallo en Base de Datos: {e}")
+
+def insert_configurador_st100(machine_id, client_id, operator, password, model_id, process_name):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        sql = """
+            INSERT INTO configurador (machine_id, client_id, operator, password, model_id, process_name)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (machine_id, client_id, operator, password, model_id, process_name))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al insertar configuración inicial ST100: {e}")
+
+########################################################## REGISTRO DE PESO ####################################################
+def weight_store(weight_name,descripcion,parte):
+    try:
+        # --- Obtener part activo ---
+        cursor = conn.cursor()
+        cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 3 AND part_number = %s ORDER BY part_id DESC LIMIT 1",(parte,))
+        part = cursor.fetchone()
+        cursor.close()
+
+        if not part:
+            # print("[ERROR] No se encontró una pieza activa.")
+            return "FAILED"
+
+        part_id = part[0]
+
+        # --- Insertar peso ---
+        cursor = conn.cursor()
+        sql = """
+            INSERT INTO weight (part_id, weight_name, description)
+            VALUES (?, ?, ?)
+        """
+        cursor.execute(sql, (part_id, weight_name, descripcion))
+        conn.commit()
+        cursor.close()
+
+        return "PASSED"
+
+    except mariadb.Error as e:
+        # print(f"[DB ERROR] weight_store(): {e}")
+        return "FAILED"
+    except Exception as e:
+        # print(f"[ERROR] weight_store(): {e}")
+        return "FAILED"
+    
+# name = "P1895152-00-G:SHG2242791000290"
+# parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
+# parameters_electrical(['Ct', '50', '10', '100', 'Numeric', 'N', 'OK', 'Comentarios'],name)
+# temperatura = "commit,Temp,start (timestamp),salida al proceso (timestamp),temp_inicial,temp_final,unit,descripcion,extra1,extra2,1/" 
+# parametros = ['commit','Welding','welding_time','welding_power','100','mm','PASSED','description','1/']
+# parameters_temperature(parametros)
+
+# temperature_data(18)
+# parameters_welding(parametros)
+# welding_data(1)
+# atributos()
+# get_urls()
