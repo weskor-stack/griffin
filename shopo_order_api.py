@@ -74,7 +74,7 @@ def consultar_api_y_guardar(api_url, shop_order,qty,directorio_destino=""):
             return False, None, 0
         
         # 5. Extraer el shop_order del primer elemento
-        shop_order = datos_api['data'][0].get('shop_order', '')
+        shop_order = datos_api['data'][0].get('shop_order_number', '')
         if not shop_order:
             # print("❌ No se encontró shop_order en la respuesta de la API")
             return False, None, 0
