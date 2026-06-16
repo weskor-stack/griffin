@@ -132,17 +132,7 @@ class ConfiguradorUI:
             conn = conexion.get_connection()
             
             url_api = ""
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT url_data FROM url_data LIMIT 1")
-                resultado = cursor.fetchone()
-                
-                if resultado and resultado[0]:
-                    url_api = resultado[0]
-                    #print(f"🔗 URL extraída de BD: {url_api}")
-                else:
-                    #print("❌ Error: Tabla 'url_data' vacía o sin URL.")
-                    messagebox.showerror("Error", "No se encontró ninguna URL configurada en la tabla 'url_data'.", parent=self.root)
-                    return
+            url_api = conexion.obtener_url_api()
 
             #print("💾 Guardando en la tabla configurador...")
             exito_db = conexion.update_configurador_shop_order_st40(shop, qty, conn)
@@ -150,7 +140,7 @@ class ConfiguradorUI:
             
             if exito_db:
                 #print("📡 Llamando al archivo shopo_order_api...")
-                exito_api, nombre_archivo, total_regs = shopo_order_api.consultar_api_y_guardar(url_api, shop, qty)
+                exito_api, nombre_archivo, total_regs = shopo_order_api.consultar_api_y_guardar(url_api[0][0], shop, qty)
                 
                 #print(f"📊 Respuesta API -> Éxito: {exito_api} | Archivo: {nombre_archivo} | Registros: {total_regs}")
                 
