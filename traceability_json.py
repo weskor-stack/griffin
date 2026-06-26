@@ -3,6 +3,7 @@ import conexion
 import rfc3339
 from datetime import datetime, timezone
 import pendulum
+from history_csv import traceability_manager
 
 def evaluar_codigo_defecto(val_plc, low_lim, high_lim, plc_defect_code, test_name, atributos_db):
     if low_lim in (None, "") or high_lim in (None, ""):
@@ -538,6 +539,7 @@ def traceability_station_100(serial_padre, part_number_padre, defect_code_defaul
         except Exception: pass
 
     steps_list = []
+    list_step = []
     global_status = "PASS"
 
     for row in all_test_rows:
@@ -547,8 +549,8 @@ def traceability_station_100(serial_padre, part_number_padre, defect_code_defaul
             lim_sup = float(row[3]) if row[3] is not None else 0.0
             unidad = str(row[5]) if row[5] is not None else ""
             status_step = str(row[6]).upper() if row[6] is not None else "PASSED"
-            name_step = str(row[11]) if row[11] is not None else "Measurement"
-            desc_step = str(row[11]) if row[11] is not None else "Description"
+            name_step = str(row[9]) if row[9] is not None else "Measurement"
+            desc_step = str(row[9]) if row[9] is not None else "Description"
             test_source = str(row[12]) if len(row) > 12 else ""
         except Exception:
             continue
@@ -596,6 +598,36 @@ def traceability_station_100(serial_padre, part_number_padre, defect_code_defaul
             "value": val_medido,
             "defect_code": step_defect
         })
+
+        list_step.append({
+            "name": name_step,
+            "description": desc_step,
+            "comparator": "N/A",
+            "lowLimit": lim_inf,
+            "highLimit": lim_sup,
+            "status": status_step,
+            "value": val_medido
+        })
+    # =============================================
+    # 🆕 GUARDAR TRAZABILIDAD EN CSV
+    # =============================================
+    try:
+        # Formatear fechas para el CSV
+        start_time_formatted = pendulum.parse(str(start_duration)).format("YYYY-MM-DD HH:mm:ss")
+        end_time_formatted = pendulum.parse(str(end_duration)).format("YYYY-MM-DD HH:mm:ss")
+        
+        # Guardar trazabilidad con TODOS los pasos
+        traceability_manager.save_traceability(
+            sn=serial_padre,
+            overall_result=global_status,
+            steps_list=list_step,
+            start_time=start_time_formatted,
+            end_time=end_time_formatted
+        )
+    except Exception as e:
+        print(f"⚠️ Error al guardar trazabilidad: {e}")
+        import traceback
+        traceback.print_exc()
 
     program_version = configurador[4]
 
