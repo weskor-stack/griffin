@@ -3637,6 +3637,175 @@ def weight_store(weight_name,descripcion,parte):
         # print(f"[ERROR] weight_store(): {e}")
         return "FAILED"
     
+##########################################################################################################################################
+#CONFIGURADOR ST80
+def configuradorst80():
+    try:
+        conn = get_connection() 
+        cursor = conn.cursor()  
+        sql = """
+            SELECT machine_id, operator, program_name_version, process_name, qty_components  
+            FROM configurador 
+            LIMIT 1
+        """
+        cursor.execute(sql)
+        registro = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if registro:
+            return registro
+        else:
+            return ("", "", "", "", "")
+            
+    except Exception as e:
+        print(f"Error en conexion.configuradorst80: {e}")
+        return "FAILED"
+
+def update_configuratorst80(machine_id, operator, program_name_version, process_name, qty_components):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            UPDATE configurador 
+            SET machine_id = ?, 
+                operator = ?, 
+                program_name_version  = ?, 
+                process_name = ?, 
+                qty_components = ?
+        """
+        cursor.execute(sql, (machine_id, operator, program_name_version, process_name, qty_components))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Fallo en Base de Datos: {e}")
+    
+def insert_configuratorst80(machine_id, operator, program_name_version, process_name, qty_components):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            INSERT INTO configurador (machine_id, operator, program_name_version, process_name, qty_components)
+            VALUES (?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (machine_id, operator, program_name_version, process_name, qty_components))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al insertar configuración inicial: {e}")
+
+############################################################################################################################################
+##################################################### CONTADOR DE COMPONENTES ##############################################################
+
+def contador_componentes(parte):
+    try:
+        # --- Obtener part activo ---
+        cursor = conn.cursor()
+        cursor.execute("SELECT part_id, part_number, model_id FROM part WHERE status_id = 3 AND part_number = %s ORDER BY part_id DESC LIMIT 1",(parte,))
+        part = cursor.fetchone()
+        cursor.close()
+
+        if not part:
+            # print("[ERROR] No se encontró una pieza activa.")
+            return "FAILED"
+
+        part_id = part[0]
+
+        # --- Insertar componente ---
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute('''
+                    SELECT COUNT(*) AS total_registros
+                    FROM component
+                    WHERE part_id = %s
+                ''', (part_id,))
+                # print(cursor.fetchall())
+                return cursor.fetchone()
+        except Exception as e:
+            # print(f"[ERROR] electrical_data(): {e}")
+            return []
+    except mariadb.Error as e:
+        # print(f"[DB ERROR] component_store(): {e}")
+        return "FAILED"
+    except Exception as e:
+        # print(f"[ERROR] component_store(): {e}")
+        return "FAILED"
+
+############################################################################################################################################
+
+def piece_store2(numPiece,description):
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT project_id, pro_key, pro_name FROM project WHERE status_id = 1 LIMIT 1")
+        project = cursor.fetchone()
+        cursor.close()
+
+        if not project:
+            return "FAILED"
+
+        cursor = conn.cursor()
+        cursor.execute("SELECT model_id, name FROM model WHERE status_id = 1 AND project_id = ?", (project[0],))
+        model = cursor.fetchone()
+        cursor.close()
+
+        if not model:
+            return "FAILED"
+
+        # Desactivar piezas anteriores
+        # cursor = conn.cursor()
+        # cursor.execute("UPDATE part SET status_id = ? WHERE status_id = ?", (2, 1))
+        # conn.commit()
+        # cursor.close()
+
+        # Insertar nueva pieza
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO part (part_number, description, model_id, status_id) VALUES (?, ?, ?, ?)", (numPiece, description, model[0], 3))
+        conn.commit()
+        cursor.close()
+
+        # Exportar a archivo
+        # history_xlsx.history_file_xlsx([numPiece, model[1]])
+
+        return "PASSED"
+
+    except mariadb.Error as e:
+        # print(f"[DB ERROR] {e}")
+        return "FAILED"
+    except Exception as e:
+        # print(f"[ERROR] {e}")
+        return "FAILED"
+    
+############################################################################################################################################ 
+
+################################################################# Obtener Parte2 ############################################################
+
+def obtener_parte2(serial_number):
+     # Obtener part_id
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT part_id, part_number, model_id, create_registration, description FROM part WHERE part_number = %s ORDER BY part_id DESC LIMIT 1",(serial_number,))
+            part = cursor.fetchone()
+        
+        if not part:
+            return "FAILED"
+        
+        
+        return part
+    except Exception as e:
+        print("[ERROR] No se encontraron atributos.")
+        return []
+############################################################################################################################################
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
 # parameters_electrical(['Ct', '50', '10', '100', 'Numeric', 'N', 'OK', 'Comentarios'],name)
@@ -3649,3 +3818,8 @@ def weight_store(weight_name,descripcion,parte):
 # welding_data(1)
 # atributos()
 # get_urls()
+
+# contador = contador_componentes("P2034365-C0-B:SFY0000TEST001")
+# print(contador[0])
+component_enabled = configuradorst80() 
+print(component_enabled[4])
