@@ -3821,5 +3821,5 @@ def obtener_parte2(serial_number):
 
 # contador = contador_componentes("P2034365-C0-B:SFY0000TEST001")
 # print(contador[0])
-component_enabled = configuradorst80() 
-print(component_enabled[4])
+# component_enabled = configuradorst80() 
+# print(component_enabled[4])
