@@ -246,6 +246,7 @@ def interlocking_station_100(serial_number, part_number):
     # print(json.dumps(interlocking_station_100, indent=4))
     return interlocking_station_100
 
+#ESTACION 60
 def interlocking_station_80(parent_serial_number, parent_part_number):
     unit_information = []
     configurador = conexion.configurador()
