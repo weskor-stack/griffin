@@ -992,6 +992,357 @@ def traceability_station_80(serial_padre, defect_code_default=""):
 
     return payload
 
+#ST60
+def traceability_st60(
+    serial_padre,
+    part_number_padre,
+    measurement_key,
+    all_screwing_attempts,
+    atributos_map,
+    now_utc
+):
+    """
+    ST60 PCBA SCREWING
+
+    Regla corregida:
+    - Los límites que se comparan son los que vienen guardados desde el PLC:
+        row[2] = low_limit PLC
+        row[3] = high_limit PLC
+    - El defect_code se toma desde la tabla attribute, mediante atributos_map:
+        value < low_limit PLC  -> attribute.defect_code
+        value > high_limit PLC -> attribute.defect_code_high
+    """
+
+    step_list_dinamico = []
+    status_general = "PASS"
+
+    catalogo_inspecciones = {
+        1: "Torque",
+        2: "Angles",
+        3: "Position X",
+        4: "Position Y"
+    }
+
+    def safe_float(value, default=0.0):
+        try:
+            if value in [None, ""]:
+                return default
+            return float(value)
+        except Exception:
+            return default
+
+    def limpiar_status(status):
+        status = str(status or "").strip().upper()
+
+        if status in ["PASS", "PASSED", "OK"]:
+            return "PASS"
+
+        if status in ["FAIL", "FAILED", "NOK"]:
+            return "FAIL"
+
+        return status if status else "FAIL"
+
+    def normalizar_texto(texto):
+        """
+        Normaliza textos para poder comparar:
+        - Torque, TORQUE, torque -> torque
+        - Position_X, Position X -> position x
+        - TORQUE TORNILLO_3 -> torque tornillo 3
+        """
+        try:
+            import unicodedata
+            import re
+
+            texto = str(texto or "").strip().lower()
+            texto = unicodedata.normalize("NFKD", texto)
+            texto = "".join(c for c in texto if not unicodedata.combining(c))
+            texto = texto.replace("_", " ").replace("-", " ")
+            texto = re.sub(r"\s+", " ", texto).strip()
+            return texto
+        except Exception:
+            return str(texto or "").strip().lower()
+
+    def normalizar_key_atributo(texto):
+        key = normalizar_texto(texto)
+
+        aliases = {
+            "t": "torque",
+            "torque": "torque",
+
+            "a": "angles",
+            "angle": "angles",
+            "angles": "angles",
+            "angulo": "angles",
+
+            "px": "position x",
+            "position x": "position x",
+            "positionx": "position x",
+
+            "py": "position y",
+            "position y": "position y",
+            "positiony": "position y",
+
+            "pressfit": "pressfit",
+            "press fit": "pressfit",
+            "presfit": "pressfit",
+            "prensado": "pressfit",
+        }
+
+        return aliases.get(key, key)
+
+    def crear_mapa_atributos_normalizado():
+        """
+        Crea un mapa local normalizado sin modificar el atributos_map recibido.
+        Soporta que el servidor haya creado llaves como:
+        torque, Torque, TORQUE, position_x, position x, etc.
+        """
+        mapa = {}
+
+        try:
+            for key, value in atributos_map.items():
+                key_norm = normalizar_key_atributo(key)
+
+                if key_norm:
+                    mapa[key_norm] = value
+                    mapa[key_norm.replace(" ", "_")] = value
+                    mapa[key_norm.replace(" ", "")] = value
+
+                # Si el dict trae name, también usarlo como alias
+                if isinstance(value, dict):
+                    nombre = value.get("name", "")
+                    nombre_norm = normalizar_key_atributo(nombre)
+
+                    if nombre_norm:
+                        mapa[nombre_norm] = value
+                        mapa[nombre_norm.replace(" ", "_")] = value
+                        mapa[nombre_norm.replace(" ", "")] = value
+
+        except Exception as e:
+            print(f"[TRACEABILITY WARNING] No se pudo normalizar atributos_map: {e}")
+
+        return mapa
+
+    atributos_map_norm = crear_mapa_atributos_normalizado()
+
+    def obtener_codigos_defecto(config_atributo):
+        """
+        Lee defect_code y defect_code_high desde el diccionario del atributo.
+        Se dejan varias llaves aceptadas para ser compatible con distintas versiones
+        del armado de atributos_map.
+        """
+        if not isinstance(config_atributo, dict):
+            return "", ""
+
+        defect_code_low = (
+            config_atributo.get("defect_code_low")
+            or config_atributo.get("defect_code")
+            or config_atributo.get("low_defect_code")
+            or config_atributo.get("defect_code_bajo")
+            or ""
+        )
+
+        defect_code_high = (
+            config_atributo.get("defect_code_high")
+            or config_atributo.get("high_defect_code")
+            or config_atributo.get("defect_code_alto")
+            or ""
+        )
+
+        return str(defect_code_low).strip(), str(defect_code_high).strip()
+
+    def buscar_config_atributo(measurement_key_db, measurement_type, plc_step_name):
+        candidatos = []
+
+        for item in [measurement_key_db, measurement_type, plc_step_name]:
+            key = normalizar_key_atributo(item)
+
+            if not key:
+                continue
+
+            candidatos.append(key)
+            candidatos.append(key.replace(" ", "_"))
+            candidatos.append(key.replace(" ", ""))
+
+            # Primera palabra:
+            # "torque tornillo 3" -> "torque"
+            if " " in key:
+                candidatos.append(key.split(" ")[0])
+
+        # Si viene la key técnica, agregar su alias explícito
+        key_tecnica = normalizar_texto(measurement_key_db)
+        if key_tecnica == "t":
+            candidatos.append("torque")
+        elif key_tecnica == "a":
+            candidatos.append("angles")
+        elif key_tecnica == "px":
+            candidatos.append("position x")
+        elif key_tecnica == "py":
+            candidatos.append("position y")
+
+        # 1. Coincidencia exacta por candidatos
+        for candidato in candidatos:
+            candidato = normalizar_key_atributo(candidato)
+
+            if candidato in atributos_map_norm:
+                return atributos_map_norm[candidato]
+
+            candidato_sin_espacios = candidato.replace(" ", "")
+            if candidato_sin_espacios in atributos_map_norm:
+                return atributos_map_norm[candidato_sin_espacios]
+
+            candidato_guion = candidato.replace(" ", "_")
+            if candidato_guion in atributos_map_norm:
+                return atributos_map_norm[candidato_guion]
+
+        # 2. Coincidencia por contenido
+        texto_busqueda = " ".join([normalizar_key_atributo(x) for x in [measurement_type, plc_step_name, measurement_key_db]])
+
+        for key_attr, config_attr in atributos_map_norm.items():
+            key_attr_norm = normalizar_key_atributo(key_attr)
+
+            if not key_attr_norm:
+                continue
+
+            if key_attr_norm in texto_busqueda:
+                return config_attr
+
+            if texto_busqueda and texto_busqueda in key_attr_norm:
+                return config_attr
+
+        return {}
+
+    def calcular_defect_code_desde_attribute(
+        val_medido,
+        lim_inf_plc,
+        lim_sup_plc,
+        measurement_key_db,
+        measurement_type,
+        plc_step_name
+    ):
+        """
+        Calcula si el fallo fue bajo o alto usando límites del PLC,
+        pero toma el código desde attribute.
+        """
+        config_atributo = buscar_config_atributo(
+            measurement_key_db=measurement_key_db,
+            measurement_type=measurement_type,
+            plc_step_name=plc_step_name
+        )
+
+        defect_code_low, defect_code_high = obtener_codigos_defecto(config_atributo)
+
+        if not config_atributo:
+            print(
+                "[TRACEABILITY WARNING] No se encontró atributo para "
+                f"key={measurement_key_db} type={measurement_type} name={plc_step_name}"
+            )
+            return ""
+
+        if val_medido < lim_inf_plc:
+            return defect_code_low
+
+        if val_medido > lim_sup_plc:
+            return defect_code_high
+
+        # Si viene FAIL pero el valor aparentemente cae dentro de rango,
+        # usamos defect_code_low como respaldo controlado.
+        return defect_code_low if defect_code_low else defect_code_high
+
+    for row in all_screwing_attempts:
+        try:
+            val_medido = safe_float(row[1])
+            lim_inf_plc = safe_float(row[2])
+            lim_sup_plc = safe_float(row[3])
+
+            unidad = str(row[5]).strip() if len(row) > 5 and row[5] is not None else ""
+            status_step = limpiar_status(row[6] if len(row) > 6 else "FAIL")
+
+            plc_step_name = str(row[10]).strip() if len(row) > 10 and row[10] is not None else ""
+
+            measurement_key_db = ""
+            measurement_type = ""
+
+            # Cuando conexion.screwing_current_state trae JOIN con screwing_measurement:
+            # row[-2] = key técnica, ejemplo T, A, PX, PY
+            # row[-1] = nombre, ejemplo Torque, Angles, Position X
+            if len(row) >= 18:
+                measurement_key_db = str(row[-2]).strip() if row[-2] is not None else ""
+                measurement_type = str(row[-1]).strip() if row[-1] is not None else ""
+            else:
+                if len(row) > 16:
+                    measurement_key_db = str(row[16]).strip() if row[16] is not None else ""
+                if len(row) > 17:
+                    measurement_type = str(row[17]).strip() if row[17] is not None else ""
+
+            # Fallback por si la consulta todavía no trae sm.key y sm.name
+            if not measurement_type:
+                id_inspeccion = int(row[13]) if len(row) > 13 and row[13] not in [None, ""] else 1
+                measurement_type = catalogo_inspecciones.get(id_inspeccion, "Torque")
+
+            if not plc_step_name:
+                plc_step_name = measurement_type
+
+        except Exception as e:
+            print(f"[TRACEABILITY ERROR] Parseando fila de Screwing: {e}")
+            continue
+
+        if status_step == "FAIL":
+            status_general = "FAIL"
+            step_defect = calcular_defect_code_desde_attribute(
+                val_medido=val_medido,
+                lim_inf_plc=lim_inf_plc,
+                lim_sup_plc=lim_sup_plc,
+                measurement_key_db=measurement_key_db,
+                measurement_type=measurement_type,
+                plc_step_name=plc_step_name
+            )
+        else:
+            step_defect = ""
+
+        step_list_dinamico.append({
+            "name": plc_step_name,
+            "description": plc_step_name,
+            "comparator": "GELE",
+            "lowLimit": lim_inf_plc,
+            "highLimit": lim_sup_plc,
+            "units": unidad,
+            "status": status_step,
+            "value": val_medido,
+            "defect_code": step_defect
+        })
+
+    if not step_list_dinamico:
+        step_list_dinamico.append({
+            "name": "NO DATA",
+            "description": "NO DATA",
+            "comparator": "GELE",
+            "lowLimit": 0.0,
+            "highLimit": 0.0,
+            "units": "",
+            "status": "FAIL",
+            "value": 0.0,
+            "defect_code": ""
+        })
+        status_general = "FAIL"
+
+    payload = {
+        "serial": serial_padre,
+        "product": part_number_padre,
+        "station": "ST60 PCBA SCREWING",
+        "operator": "999999",
+        "password": "",
+        "start_time": now_utc,
+        "end_time": now_utc,
+        "measkey": measurement_key,
+        "process_name": "P2_D_SCREWING",
+        "status": status_general,
+        "test_steps": {
+            "ST60 PCBA SCREWING LIST": step_list_dinamico
+        }
+    }
+
+    return payload
+
 # if __name__ == "__main__":
 #     resultado_json = traceability_component_station_80(
 #         serial_padre = "P1517040-01-G:REV01:SANN26097000002",

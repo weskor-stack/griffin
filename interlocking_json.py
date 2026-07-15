@@ -322,6 +322,42 @@ def interlocking_component_station_80(parent_serial_number, parent_part_number, 
     }
     # print(json.dumps(interlocking_st50_80, indent=4))
     return interlocking_st50_80
+
+def interlocking_st60(parent_serial_number, parent_part_number):
+    config = conexion.configurador_st60()
+    if not config or config == "FAILED":
+        program_name_version = ""
+        machine_id           = ""
+        process_name         = ""
+        operator_id          = ""
+    else:
+        program_name_version = str(config[0]).strip()
+        machine_id           = str(config[1]).strip()
+        process_name         = str(config[2]).strip()
+        operator_id          = str(config[4]).strip()
+
+    payload = {
+        "serial":       parent_serial_number,
+        "product":      parent_part_number,
+        "station":      machine_id,
+        "operator":     operator_id,
+        "process_name": process_name,
+        "location":     "",
+        "test_steps": {
+            "unit_information": [
+                {
+                    "name":  "Program_Name_Version",
+                    "value": program_name_version
+                },
+                {
+                    "name":  "Machine_ID",
+                    "value": machine_id
+                }
+            ]
+        }
+    }
+
+    return payload
 # interlocking_station_20("AABB-parent_serial_number","CCGG02-parent_part_number","ZZXX01-heater_part_number")
 # interlocking_station_50_80("MODEL1-001-0000015", "2102110-00-C", "COMPONENT-1")
 # interlocking_station_40_empty_data("MODEL1-001-0000015", "2102110-00-C", "HEATSINK-1")
