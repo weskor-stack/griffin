@@ -61,8 +61,9 @@ def registrar_json_api(nombre_api, tipo, data, color=None):
     """
 
     texto = (
-        f"\n{nombre_api} {tipo}\n"
+        f"\n========== {nombre_api} {tipo} ==========\n"
         f"{json_pretty(data)}\n"
+        f"=========================================\n"
     )
 
     print(texto)
@@ -116,17 +117,14 @@ def post_api_debug(nombre_api, url, payload, timeout=30):
 
 def normalizar_commit_screwing_st60(cadena_original):
     """
-    Normaliza commits Screwing ST60.
+    Convierte un commit reducido de ST60 a la estructura completa
+    que espera commands.py.
 
-    Soporta:
-    1) Cadena completa:
-       commit,Screwing,T,...,A,...,PX,...,PY,...,4,SERIAL,1/
+    Entrada permitida:
+    commit,Screwing,T,1.5,1,1.8,Numeric,N,PASSED,TORQUE TORNILLO_1,...,SERIAL,1/
 
-    2) Cadena parcial:
-       commit,Screwing,T,...,Comentario,,,,,,,,,,,,,,,,,,,,,,,,,4,SERIAL,1/
-
-    En el caso parcial, completa A/PX/PY como dummy para que commands.py no falle.
-    El número antes del serial se respeta como número de tornillo.
+    Salida:
+    commit,Screwing,T,...,A,...,PX,...,PY,...,4,SERIAL,1/,
     """
 
     cadena_original = str(cadena_original).strip()
@@ -134,7 +132,7 @@ def normalizar_commit_screwing_st60(cadena_original):
     if not cadena_original.startswith("commit,Screwing,"):
         return cadena_original
 
-    # Cortar exactamente hasta 1/
+    # Nos quedamos solo hasta 1/
     if "1/" in cadena_original:
         cadena_original = cadena_original[:cadena_original.index("1/") + 2]
 
@@ -144,56 +142,37 @@ def normalizar_commit_screwing_st60(cadena_original):
     if len(options) < 10:
         return cadena_original
 
-    # Buscar serial y número de tornillo
+    # Buscar serial desde el final
     serial = ""
-    numero_tornillo = ""
-
-    serial_index = -1
-
-    for i in range(len(options) - 1, -1, -1):
-        item = str(options[i]).strip()
-
+    for item in reversed(options):
+        item = str(item).strip()
         if ":" in item and item != "1/":
             serial = item
-            serial_index = i
             break
 
     if not serial:
         print("[NORMALIZAR SCREWING] No se encontró serial en la cadena.")
         return cadena_original
 
-    if serial_index > 0:
-        numero_tornillo = str(options[serial_index - 1]).strip()
+    # Si ya viene completa con T, A, PX, PY, solo aseguramos coma final
+    if len(options) >= 37:
+        try:
+            if options[2] == "T" and options[10] == "A" and options[18] == "PX" and options[26] == "PY":
+                return clean + ","
+        except Exception:
+            pass
 
-    if not numero_tornillo:
-        numero_tornillo = "1"
-
-    # Si ya viene completa con T, A, PX, PY, solo asegurar coma final
-    try:
-        if (
-            len(options) >= 37
-            and options[2].strip().upper() == "T"
-            and options[10].strip().upper() == "A"
-            and options[18].strip().upper() == "PX"
-            and options[26].strip().upper() == "PY"
-        ):
-            print("[NORMALIZAR SCREWING] Cadena completa detectada, se respeta estructura original.")
-            return clean + ","
-    except Exception:
-        pass
-
-    # Tomar bloque T real
+    # Tomar solo el bloque de Torque
     torque = options[2:10]
 
     if len(torque) != 8:
         print(f"[NORMALIZAR SCREWING] Bloque torque inválido: {torque}")
         return cadena_original
 
-    if str(torque[0]).strip().upper() != "T":
+    if torque[0] != "T":
         print(f"[NORMALIZAR SCREWING] La medición inicial no es T: {torque[0]}")
         return cadena_original
 
-    # Bloques dummy para que commands.py reciba la estructura completa
     angle = ["A", "0", "0", "0", "Numeric", "degrees", "PASSED", "None"]
     px    = ["PX", "0", "0", "0", "Numeric", "mm", "PASSED", "None"]
     py    = ["PY", "0", "0", "0", "Numeric", "mm", "PASSED", "None"]
@@ -204,14 +183,13 @@ def normalizar_commit_screwing_st60(cadena_original):
         + angle
         + px
         + py
-        + [numero_tornillo, serial, "1/", ""]
+        + ["4", serial, "1/", ""]
     )
 
     cadena_normalizada = ",".join(nueva)
 
-    print("[NORMALIZAR SCREWING] Cadena parcial normalizada:")
+    print("[NORMALIZAR SCREWING] Cadena normalizada:")
     print(cadena_normalizada)
-    print(f"[NORMALIZAR SCREWING] Tornillo={numero_tornillo}")
     print(f"[NORMALIZAR SCREWING] len={len(cadena_normalizada.split(','))}")
 
     return cadena_normalizada
@@ -219,32 +197,15 @@ def normalizar_commit_screwing_st60(cadena_original):
 
 def obtener_keys_reales_screwing(cadena_commit):
     """
-    Detecta qué mediciones fueron realmente enviadas por el PLC.
+    Detecta qué mediciones Screwing fueron realmente enviadas por el PLC.
 
-    Cada bloque Screwing tiene 8 campos:
+    Cada bloque tiene 8 campos:
     key,value,low,high,type,unit,result,metadata
 
-    Se ignora solo si:
-    - metadata viene vacío / None / NULL / N/A
-    - value, low y high vienen vacíos o 0
+    Los bloques dummy agregados por normalizar_commit_screwing_st60()
+    traen metadata None/NULL/vacía, por eso no se muestran en la tabla UI.
     """
-
     keys_reales = set()
-
-    def es_vacio_o_cero(valor):
-        try:
-            if valor is None:
-                return True
-
-            valor_str = str(valor).strip().upper()
-
-            if valor_str in ["", "NONE", "NULL", "N/A"]:
-                return True
-
-            return float(valor_str) == 0.0
-
-        except Exception:
-            return False
 
     try:
         clean = str(cadena_commit).strip().rstrip(",")
@@ -265,21 +226,9 @@ def obtener_keys_reales_screwing(cadena_commit):
                 continue
 
             key = str(bloque[0]).strip().upper()
-            value = bloque[1]
-            low_limit = bloque[2]
-            high_limit = bloque[3]
             metadata = str(bloque[7]).strip().upper()
 
-            metadata_vacia = metadata in ["", "NONE", "NULL", "N/A"]
-
-            bloque_dummy = (
-                metadata_vacia and
-                es_vacio_o_cero(value) and
-                es_vacio_o_cero(low_limit) and
-                es_vacio_o_cero(high_limit)
-            )
-
-            if not bloque_dummy:
+            if metadata not in ["", "NONE", "NULL", "N/A"]:
                 keys_reales.add(key)
 
     except Exception as e:
@@ -810,7 +759,7 @@ def worker(conn, addr):
             except ConnectionResetError:
                 safe_insert("PLC - Disconnected"+"\n", "red")
                 logging.info("PLC - Disconnected")
-                conexionBitacora.event("CDBF-001","Command received PLC-Disconnected",month,day)
+                conexionBitacora.event("CDBF-001","|Command received| PLC-Disconnected",month,day)
                 exit_event.set()
                 break
             except Exception as e:
@@ -894,7 +843,7 @@ def worker(conn, addr):
                                             SERIAL_PADRE_GLOBAL = str(name_piece).strip()
                                             PART_NUMBER         = PART_NUMBER_GLOBAL
                                             
-                                            safe_insert(f"✅ Extracción Manual OK -> PN: {PART_NUMBER_GLOBAL}  Serial: {SERIAL_PADRE_GLOBAL}", "green")
+                                            safe_insert(f"✅ Extracción Manual OK -> PN: {PART_NUMBER_GLOBAL} | Serial: {SERIAL_PADRE_GLOBAL}", "green")
                                             heatsink_scanned = True
                                         else:
                                             entry_piece.configure(state=ctk.NORMAL)
@@ -1075,7 +1024,7 @@ def worker(conn, addr):
                                     PART_NUMBER         = PART_NUMBER_GLOBAL
                                     COMPONENT           = scanned_component
                                     
-                                    safe_insert(f"✅ Extracción PLC OK -> PN: {PART_NUMBER_GLOBAL}  Serial: {SERIAL_PADRE_GLOBAL}", "green")
+                                    safe_insert(f"✅ Extracción PLC OK -> PN: {PART_NUMBER_GLOBAL} | Serial: {SERIAL_PADRE_GLOBAL}", "green")
                                 else:
                                     safe_insert("❌ Error: La cadena enviada por el PLC no contiene ':' para separar PN y Serial", "red")
                                     conn.send("FAILED".encode('UTF-8'))
@@ -1232,7 +1181,7 @@ def worker(conn, addr):
                                 except Exception as e:
                                     safe_insert(f"Error enviando: {e}", "red")
 
-                                conexionBitacora.event("END-F001", "END_PROCESS,FAILED,FORMATO_INVALIDO", month, day)
+                                conexionBitacora.event("END-F001", "|END_PROCESS,FAILED,FORMATO_INVALIDO|", month, day)
                                 green_label.configure(image=image_green)
                                 red_label.configure(image=image_red_full)
                                 break
@@ -1242,9 +1191,6 @@ def worker(conn, addr):
                             # ============================================================
                             socket_status_raw = str(option[1]).strip().upper() if len(option) > 1 else "PASSED"
                             tornillo_afectado = str(option[2]).strip().upper() if len(option) > 2 else ""
-                            
-                            if tornillo_afectado.isdigit():
-                                tornillo_afectado = f"TORNILLO_{tornillo_afectado}"
 
                             raw_intento = str(option[3]).strip().lower() if len(option) > 3 else "1"
                             raw_intento = raw_intento.replace("intento", "").strip()
@@ -1265,9 +1211,9 @@ def worker(conn, addr):
                                 socket_status_raw = "FAILED"
 
                             print(
-                                f"[DEBUG] Status: {socket_status_raw}  "
-                                f"Tornillo: {tornillo_afectado}  "
-                                f"Intento: {intento_actual}  "
+                                f"[DEBUG] Status: {socket_status_raw} | "
+                                f"Tornillo: {tornillo_afectado} | "
+                                f"Intento: {intento_actual} | "
                                 f"Serial PLC: {serial_plc}"
                             )
 
@@ -1286,7 +1232,7 @@ def worker(conn, addr):
                                 except Exception as e:
                                     safe_insert(f"Error enviando: {e}", "red")
 
-                                conexionBitacora.event("END-F002", "END_PROCESS,FAILED,SIN_SERIAL_ACTIVO", month, day)
+                                conexionBitacora.event("END-F002", "|END_PROCESS,FAILED,SIN_SERIAL_ACTIVO|", month, day)
                                 green_label.configure(image=image_green)
                                 red_label.configure(image=image_red_full)
                                 break
@@ -1374,7 +1320,7 @@ def worker(conn, addr):
                                 for k, v in atributos_map.items():
                                     print(
                                         f"{k} -> "
-                                        f"LOW={v.get('defect_code_low')}  "
+                                        f"LOW={v.get('defect_code_low')} | "
                                         f"HIGH={v.get('defect_code_high')}"
                                     )
                                 print("==================================\n")
@@ -1394,8 +1340,8 @@ def worker(conn, addr):
                             for row in all_screwing_attempts:
                                 try:
                                     print(
-                                        f"ID={row[0]}  VALUE={row[1]}  LOW={row[2]}  HIGH={row[3]}  "
-                                        f"RESULT={row[6]}  DESCRIPTION={row[10]}"
+                                        f"ID={row[0]} | VALUE={row[1]} | LOW={row[2]} | HIGH={row[3]} | "
+                                        f"RESULT={row[6]} | DESCRIPTION={row[10]}"
                                     )
                                 except Exception:
                                     print(row)
@@ -1413,7 +1359,7 @@ def worker(conn, addr):
                                 except Exception as e:
                                     safe_insert(f"Error enviando: {e}", "red")
 
-                                conexionBitacora.event("END-F003", "END_PROCESS,FAILED,SIN_MEDICIONES", month, day)
+                                conexionBitacora.event("END-F003", "|END_PROCESS,FAILED,SIN_MEDICIONES|", month, day)
                                 green_label.configure(image=image_green)
                                 red_label.configure(image=image_red_full)
                                 break
@@ -1459,7 +1405,7 @@ def worker(conn, addr):
                                 except Exception as e:
                                     safe_insert(f"Error enviando: {e}", "red")
 
-                                conexionBitacora.event("END-F004", "TRACEABILITY,FAILED", month, day)
+                                conexionBitacora.event("END-F004", "|TRACEABILITY,FAILED|", month, day)
                                 green_label.configure(image=image_green)
                                 red_label.configure(image=image_red_full)
                                 break
@@ -1513,8 +1459,8 @@ def worker(conn, addr):
                                                 dc_high = "TORQUE_ALTO"
 
                                             print(
-                                                f"[DEBUG] Defecto encontrado  Desc={description_db}  "
-                                                f"Value={val_medido}  Low={lim_inf}  High={lim_sup}"
+                                                f"[DEBUG] Defecto encontrado | Desc={description_db} | "
+                                                f"Value={val_medido} | Low={lim_inf} | High={lim_sup}"
                                             )
 
                                             if val_medido < lim_inf:
@@ -1590,7 +1536,7 @@ def worker(conn, addr):
                                     except Exception as e:
                                         safe_insert(f"Error enviando: {e}", "red")
 
-                                    conexionBitacora.event("END-F005", "CONDUIT_RECORD_DEFECT,FAILED", month, day)
+                                    conexionBitacora.event("END-F005", "|CONDUIT_RECORD_DEFECT,FAILED|", month, day)
                                     green_label.configure(image=image_green)
                                     red_label.configure(image=image_red_full)
                                     break
@@ -1636,7 +1582,7 @@ def worker(conn, addr):
                                     if response_repair.status_code in [200, 201]:
                                         safe_insert(
                                             "Command received-> " + cadena_original + "\n" +
-                                            f"Traceability OK  RecordDefect OK  RepairAllDefects OK  Intento {intento_actual}/{max_intentos}\n" +
+                                            f"Traceability OK | RecordDefect OK | RepairAllDefects OK | Intento {intento_actual}/{max_intentos}\n" +
                                             "Command START-AGAIN\n"
                                         )
 
@@ -1645,7 +1591,7 @@ def worker(conn, addr):
                                         except Exception as e:
                                             safe_insert(f"Error enviando: {e}", "red")
 
-                                        conexionBitacora.event("END-P001", "END_PROCESS,FAILED,START_AGAIN", month, day)
+                                        conexionBitacora.event("END-P001", "|END_PROCESS,FAILED,START_AGAIN|", month, day)
 
                                         green_label.configure(image=image_green)
                                         red_label.configure(image=image_red_full)
@@ -1662,7 +1608,7 @@ def worker(conn, addr):
                                         except Exception as e:
                                             safe_insert(f"Error enviando: {e}", "red")
 
-                                        conexionBitacora.event("END-F006", "CONDUIT_REPAIR_ALL_DEFECTS,FAILED", month, day)
+                                        conexionBitacora.event("END-F006", "|CONDUIT_REPAIR_ALL_DEFECTS,FAILED|", month, day)
                                         green_label.configure(image=image_green)
                                         red_label.configure(image=image_red_full)
 
@@ -1707,8 +1653,8 @@ def worker(conn, addr):
                                     if response_end_failed.status_code in [200, 201]:
                                         safe_insert(
                                             "Command received-> " + cadena_original + "\n" +
-                                            f"Traceability OK  RecordDefect OK  Conduit End OK  Pieza FAILED  Intento {intento_actual}/{max_intentos}\n" +
-                                            "pieza FAILED\n",
+                                            f"Traceability OK | RecordDefect OK | Conduit End OK | Pieza FAILED | Intento {intento_actual}/{max_intentos}\n" +
+                                            "Command FAILED\n",
                                             "red"
                                         )
 
@@ -1729,7 +1675,7 @@ def worker(conn, addr):
 
                                         print("[INFO] Pieza liberada localmente como FAILED.")
 
-                                        conexionBitacora.event("END-F007", "END_PROCESS,FAILED,MAX_ATTEMPTS", month, day)
+                                        conexionBitacora.event("END-F007", "|END_PROCESS,FAILED,MAX_ATTEMPTS|", month, day)
 
                                         green_label.configure(image=image_green)
                                         red_label.configure(image=image_red_full)
@@ -1746,7 +1692,7 @@ def worker(conn, addr):
                                         except Exception as e:
                                             safe_insert(f"Error enviando: {e}", "red")
 
-                                        conexionBitacora.event("END-F008", "CONDUIT_END,FAILED", month, day)
+                                        conexionBitacora.event("END-F008", "|CONDUIT_END,FAILED|", month, day)
                                         green_label.configure(image=image_green)
                                         red_label.configure(image=image_red_full)
 
@@ -1793,7 +1739,7 @@ def worker(conn, addr):
                                 if response_end_passed.status_code in [200, 201]:
                                     safe_insert(
                                         "Command received-> " + cadena_original + "\n" +
-                                        "Traceability OK  Conduit End OK  Pieza PASSED\n" +
+                                        "Traceability OK | Conduit End OK | Pieza PASSED\n" +
                                         "Command PASSED\n"
                                     )
 
@@ -1814,7 +1760,7 @@ def worker(conn, addr):
 
                                     print("[INFO] Pieza liberada localmente como PASSED.")
 
-                                    conexionBitacora.event("END-P002", "END_PROCESS,PASSED", month, day)
+                                    conexionBitacora.event("END-P002", "|END_PROCESS,PASSED|", month, day)
 
                                     green_label.configure(image=image_green_full)
                                     red_label.configure(image=image_red)
@@ -1831,7 +1777,7 @@ def worker(conn, addr):
                                     except Exception as e:
                                         safe_insert(f"Error enviando: {e}", "red")
 
-                                    conexionBitacora.event("END-F009", "CONDUIT_END_PASSED,FAILED", month, day)
+                                    conexionBitacora.event("END-F009", "|CONDUIT_END_PASSED,FAILED|", month, day)
                                     green_label.configure(image=image_green)
                                     red_label.configure(image=image_red_full)
 
@@ -1850,7 +1796,7 @@ def worker(conn, addr):
                             except Exception as send_error:
                                 safe_insert(f"Error enviando: {send_error}", "red")
 
-                            conexionBitacora.event("END-F999", f"END_PROCESS,EXCEPTION {e}", month, day)
+                            conexionBitacora.event("END-F999", f"|END_PROCESS,EXCEPTION| {e}", month, day)
 
                             green_label.configure(image=image_green)
                             red_label.configure(image=image_red_full)
@@ -1870,8 +1816,8 @@ def worker(conn, addr):
                                 conn.send("PASSED".encode('UTF-8'))
                             except Exception as e:
                                 safe_insert(f"Error enviando: {e}", "red")
-                            conexionBitacora.event("NMP-001","Command received "+cadena,month,day)
-                            conexionBitacora.event("CMD-P001","Command,PASSED",month,day)
+                            conexionBitacora.event("NMP-001","|Command received| "+cadena,month,day)
+                            conexionBitacora.event("CMD-P001","|Command,PASSED|",month,day)
                             green_label.configure(image=image_green_full)
                             red_label.configure(image=image_red)
                         else:
@@ -1880,8 +1826,8 @@ def worker(conn, addr):
                                 conn.send("FAILED".encode('UTF-8'))
                             except Exception as e:
                                 safe_insert(f"Error enviando: {e}", "red")
-                            conexionBitacora.event("NMP-002","Command received "+cadena,month,day)
-                            conexionBitacora.event("CMD-F001","Command,FAILED",month,day)
+                            conexionBitacora.event("NMP-002","|Command received| "+cadena,month,day)
+                            conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
                             green_label.configure(image=image_green)
                             red_label.configure(image=image_red_full)
                         cadena = ""
@@ -1894,13 +1840,13 @@ def worker(conn, addr):
                             if(modelName == "0"):
                                 modelName = "Unregistered model"
                                 model_name.set(modelName)
-                                safe_insert("Command received-> "+cadena+ " Model: " +modelName+"\n"+"Command FAILED"+"\n", "red")
+                                safe_insert("Command received-> "+cadena+ " |Model:| " +modelName+"\n"+"Command FAILED"+"\n", "red")
                                 try:
                                     conn.send("FAILED".encode('UTF-8'))
                                 except Exception as e:
                                     safe_insert(f"Error enviando: {e}", "red")
-                                conexionBitacora.event("SMP-002","Command received "+cadena+" Model: "+modelName,month,day)
-                                conexionBitacora.event("CMD-F001","Command,FAILED",month,day)
+                                conexionBitacora.event("SMP-002","|Command received| "+cadena+" |Model:| "+modelName,month,day)
+                                conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
                                 green_label.configure(image=image_green)
                                 red_label.configure(image=image_red_full)
                             else:
@@ -1911,8 +1857,8 @@ def worker(conn, addr):
                                     conn.send("PASSED".encode('UTF-8'))
                                 except Exception as e:
                                     safe_insert(f"Error enviando: {e}", "red")
-                                conexionBitacora.event("SMP-001","Command received "+cadena,month,day)
-                                conexionBitacora.event("CMD-P001","Command,PASSED",month,day)
+                                conexionBitacora.event("SMP-001","|Command received| "+cadena,month,day)
+                                conexionBitacora.event("CMD-P001","|Command,PASSED|",month,day)
                                 green_label.configure(image=image_green_full)
                                 red_label.configure(image=image_red)
                         else:
@@ -1921,8 +1867,8 @@ def worker(conn, addr):
                                 conn.send("FAILED".encode('UTF-8'))
                             except Exception as e:
                                 safe_insert(f"Error enviando: {e}", "red")
-                            conexionBitacora.event("SMP-002","Command received "+cadena,month,day)
-                            conexionBitacora.event("CMD-F001","Command,FAILED",month,day)
+                            conexionBitacora.event("SMP-002","|Command received| "+cadena,month,day)
+                            conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
                             green_label.configure(image=image_green)
                             red_label.configure(image=image_red_full)
                         cadena = ""
@@ -1957,11 +1903,11 @@ def worker(conn, addr):
 
                                 conexionBitacora.event(
                                     "CMD-C001",
-                                    "Command received " + cadena_original + ": The part has not been loaded",
+                                    "|Command received| " + cadena_original + ": The part has not been loaded",
                                     month,
                                     day
                                 )
-                                conexionBitacora.event("CMD-F001", "Command,FAILED", month, day)
+                                conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
 
                                 green_label.configure(image=image_green)
                                 red_label.configure(image=image_red_full)
@@ -1978,7 +1924,7 @@ def worker(conn, addr):
                                 print(f"[DEBUG COMMIT FINAL] {repr(cadena_para_commit)}")
                                 print(f"[DEBUG COMMIT LEN] {len(cadena_para_commit.split(','))}")
 
-                                # clear_table_data()
+                                clear_table_data()
 
                                 # IMPORTANTE:
                                 # Solo llamar commands.commit UNA vez
@@ -2005,8 +1951,8 @@ def worker(conn, addr):
                                     except Exception as e:
                                         safe_insert(f"Error enviando: {e}", "red")
 
-                                    conexionBitacora.event("COM-001", "Command received " + cadena_original, month, day)
-                                    conexionBitacora.event("CMD-P001", "Command,PASSED", month, day)
+                                    conexionBitacora.event("COM-001", "|Command received| " + cadena_original, month, day)
+                                    conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
 
                                     green_label.configure(image=image_green_full)
                                     red_label.configure(image=image_red)
@@ -2023,8 +1969,8 @@ def worker(conn, addr):
                                     except Exception as e:
                                         safe_insert(f"Error enviando: {e}", "red")
 
-                                    conexionBitacora.event("COM-002", "Command received " + cadena_original, month, day)
-                                    conexionBitacora.event("CMD-F001", "Command,FAILED", month, day)
+                                    conexionBitacora.event("COM-002", "|Command received| " + cadena_original, month, day)
+                                    conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
 
                                     green_label.configure(image=image_green)
                                     red_label.configure(image=image_red_full)
@@ -2041,8 +1987,8 @@ def worker(conn, addr):
                             except Exception as e:
                                 safe_insert(f"Error enviando: {e}", "red")
 
-                            conexionBitacora.event("COM-002", "Command received " + cadena_original, month, day)
-                            conexionBitacora.event("CMD-F001", "Command,FAILED", month, day)
+                            conexionBitacora.event("COM-002", "|Command received| " + cadena_original, month, day)
+                            conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
 
                             green_label.configure(image=image_green)
                             red_label.configure(image=image_red_full)
@@ -2095,8 +2041,8 @@ def worker(conn, addr):
                                             logging.error("Error storing component in database")
                                             break
                                         safe_insert("Command received-> "+cadena+" actuator: "+name_piece+"\n"+"Command COMPONENT PASSED"+"\n")
-                                        conexionBitacora.event("SPP-001","Command received "+cadena+" actuator: "+name_piece,month,day)
-                                        conexionBitacora.event("CMD-P001","Command,PASSED",month,day)
+                                        conexionBitacora.event("SPP-001","|Command received| "+cadena+" actuator: "+name_piece,month,day)
+                                        conexionBitacora.event("CMD-P001","|Command,PASSED|",month,day)
                                         green_label.configure(image=image_green_full)
                                         red_label.configure(image=image_red)
                                         pieza = name_piece
@@ -2117,8 +2063,8 @@ def worker(conn, addr):
                                                 except Exception as e:
                                                     safe_insert(f"Error enviando: {e}", "red")
                                                 safe_insert("Command received-> "+cadena+" RESET PROCESS-> Command: "+reset+"\n"+"Command COMPONENT PASSED")
-                                                conexionBitacora.event("RP-002","Command received "+reset,month,day)
-                                                conexionBitacora.event("CMD-F001","Command,FAILED",month,day)
+                                                conexionBitacora.event("RP-002","|Command received| "+reset,month,day)
+                                                conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
                                                 green_label.configure(image=image_green_full)
                                                 red_label.configure(image=image_red)
                                                 break
@@ -2152,8 +2098,8 @@ def worker(conn, addr):
                                     logging.error("Error storing component in database")
                                     break
                                 safe_insert("Command received-> "+cadena+" actuator: "+name_piece+"\n"+"Command COMPONENT PASSED")
-                                conexionBitacora.event("SPP-001","Command received "+cadena+" actuator: "+name_piece,month,day)
-                                conexionBitacora.event("CMD-P001","Command,PASSED",month,day)
+                                conexionBitacora.event("SPP-001","|Command received| "+cadena+" actuator: "+name_piece,month,day)
+                                conexionBitacora.event("CMD-P001","|Command,PASSED|",month,day)
                                 green_label.configure(image=image_green_full)
                                 red_label.configure(image=image_red)
                                 entry_piece.configure(state="readonly", textvariable=piece_name)
@@ -2169,16 +2115,16 @@ def worker(conn, addr):
                                     conn.send("verify data".encode('UTF-8'))
                                 except Exception as e:
                                     safe_insert(f"Error enviando: {e}", "red")
-                                conexionBitacora.event("SPP-002","Command received "+cadena+" part: "+name_piece,month,day)
-                                conexionBitacora.event("CMD-F001","Command,FAILED",month,day)
+                                conexionBitacora.event("SPP-002","|Command received| "+cadena+" part: "+name_piece,month,day)
+                                conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
                                 green_label.configure(image=image_green)
                                 red_label.configure(image=image_red_full)
                                 break
                         else:
                             conn.send("FAILED".encode('UTF-8'))
                             safe_insert("Command received-> "+cadena+"\n"+"Command FAILED", "red")
-                            conexionBitacora.event("SPP-002","Command received "+cadena,month,day)
-                            conexionBitacora.event("CMD-F001","Command,FAILED",month,day)
+                            conexionBitacora.event("SPP-002","|Command received| "+cadena,month,day)
+                            conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
                             green_label.configure(image=image_green)
                             red_label.configure(image=image_red_full)
                             cadena = ""
@@ -2198,8 +2144,8 @@ def worker(conn, addr):
                             conn.send("FAILED".encode('UTF-8'))
                         except Exception as e:
                             safe_insert(f"Error enviando: {e}", "red")
-                        conexionBitacora.event("COM-002","Command received "+cadena,month,day)
-                        conexionBitacora.event("CMD-F001","Command,FAILED",month,day)
+                        conexionBitacora.event("COM-002","|Command received| "+cadena,month,day)
+                        conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
                         green_label.configure(image=image_green)
                         red_label.configure(image=image_red_full)
                         cadena = ""

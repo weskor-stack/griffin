@@ -591,6 +591,17 @@ def parameters_pressfit(element, name_piece):
     return "PASSED"
 
 def parameters_screwing(element, name_piece):
+    """
+    ST60 Screwing.
+
+    element llega desde commands.py con esta forma:
+    [key, value, low_limit, high_limit, data_type, unit, result, metadata, posicion]
+
+    Reglas ST60:
+    - metadata debe ser el nombre real enviado por PLC, por ejemplo: TORQUE TORNILLO_3.
+    - A/PX/PY dummy generados por el normalizador vienen con metadata None y se ignoran.
+    - Se normaliza result a PASS / FAIL para Traceability.
+    """
     import evaluation
     from datetime import datetime, timezone
     import rfc3339
@@ -643,45 +654,13 @@ def parameters_screwing(element, name_piece):
             return "FAILED"
 
         value, low_limit, high_limit, data_type, units, result, metadata = element[1:8]
-        comentario_plc = str(metadata).strip() if metadata is not None else ""
 
-        try:
-            numero_tornillo = str(element[8]).strip()
-        except Exception:
-            numero_tornillo = ""
+        plc_step_name = str(metadata).strip() if metadata is not None else ""
 
-        def es_vacio_o_cero(valor):
-            try:
-                if valor is None:
-                    return True
-
-                valor_str = str(valor).strip().upper()
-
-                if valor_str in ["", "NONE", "NULL", "N/A"]:
-                    return True
-
-                return float(valor_str) == 0.0
-
-            except Exception:
-                return False
-
-        comentario_vacio = comentario_plc.upper() in ["", "NONE", "NULL", "N/A"]
-
-        bloque_dummy = (
-            comentario_vacio and
-            es_vacio_o_cero(value) and
-            es_vacio_o_cero(low_limit) and
-            es_vacio_o_cero(high_limit)
-        )
-
-        # El normalizador mete A/PX/PY dummy con metadata None y valores 0.
+        # El normalizador mete A/PX/PY dummy con metadata None.
         # No se guardan en BD y se regresa PASSED para que commands.py no falle.
-        if bloque_dummy:
-            print(
-                f"[SCREWING] Medición ignorada. "
-                f"Key={measurement_key} | Comentario={comentario_plc} | "
-                f"Value={value} | Low={low_limit} | High={high_limit}"
-            )
+        if plc_step_name.upper() in ["", "NONE", "NULL", "N/A"]:
+            print(f"[SCREWING] Medición ignorada. Key={measurement_key} Nombre PLC={plc_step_name}")
             return "PASSED"
 
         result_clean = str(result).strip().upper()
@@ -691,14 +670,7 @@ def parameters_screwing(element, name_piece):
             result_clean = "FAIL"
 
         compoperator = evaluation.evaluation(element[1:4])
-
-        measurement_type = str(measurement[1]).strip() if measurement and len(measurement) > 1 else str(measurement_key).strip()
-        if numero_tornillo:
-            description = f"{measurement_type.upper()} TORNILLO_{numero_tornillo}"
-        else:
-            description = measurement_type.upper()
-
-        metadata = comentario_plc
+        description = plc_step_name
 
         screwing_measurement_id = measurement[0]
         station_id = station[0]
@@ -2896,27 +2868,23 @@ def verificar_cantidad_componentes(serial_padre):
 #CONFIGURADOR ST50-80
 def configuradorst50_80():
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-
+        conn = get_connection() 
+        cursor = conn.cursor()  
         sql = """
-            SELECT machine_id, operator, model_id, process_name, shop_order
-            FROM configurador
-            ORDER BY configurador_id DESC
+            SELECT machine_id, operator, model_id, process_name, shop_order 
+            FROM configurador 
             LIMIT 1
         """
-
         cursor.execute(sql)
         registro = cursor.fetchone()
-
         cursor.close()
         conn.close()
-
+        
         if registro:
             return registro
-
-        return "FAILED"
-
+        else:
+            return ("", "", "", "", "")
+            
     except Exception as e:
         print(f"Error en conexion.configuradorst50_80: {e}")
         return "FAILED"
@@ -3243,64 +3211,6 @@ def insert_api_by_name_st50_80(api_name, url_data):
         if conn: conn.rollback()
         raise Exception(f"Fallo al registrar la API {api_name}: {e}")
     
-def preparar_pieza_para_proceso(numPiece):
-    """
-    Crea una nueva corrida activa/pending para una pieza.
-    
-    Reglas:
-    - Si ya hay una corrida pendiente status_id = 3 para el mismo serial, la manda a 2
-      para evitar tener dos registros activos del mismo serial.
-    - Siempre inserta un nuevo registro status_id = 3 para el ciclo actual.
-    - Esto permite reprocesar una pieza aunque ya exista como procesada status_id = 2.
-    """
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                "SELECT project_id, pro_key, pro_name FROM project WHERE status_id = 1 LIMIT 1"
-            )
-            project = cursor.fetchone()
-
-        if not project:
-            print("[ERROR] preparar_pieza_para_proceso(): No hay proyecto activo.")
-            return "FAILED"
-
-        with conn.cursor() as cursor:
-            cursor.execute(
-                "SELECT model_id, name FROM model WHERE status_id = 1 AND project_id = ? LIMIT 1",
-                (project[0],)
-            )
-            model = cursor.fetchone()
-
-        if not model:
-            print("[ERROR] preparar_pieza_para_proceso(): No hay modelo activo.")
-            return "FAILED"
-
-        # Cerrar cualquier corrida pendiente anterior del mismo serial
-        with conn.cursor() as cursor:
-            cursor.execute(
-                "UPDATE part SET status_id = ? WHERE part_number = ? AND status_id = ?",
-                (2, numPiece, 3)
-            )
-            conn.commit()
-
-        # Crear nueva corrida activa/pending
-        with conn.cursor() as cursor:
-            cursor.execute(
-                "INSERT INTO part (part_number, model_id, status_id) VALUES (?, ?, ?)",
-                (numPiece, model[0], 3)
-            )
-            conn.commit()
-
-        return "PASSED"
-
-    except Exception as e:
-        try:
-            conn.rollback()
-        except:
-            pass
-
-        print(f"[ERROR] preparar_pieza_para_proceso(): {e}")
-        return "FAILED"    
 
 #CONFIGURADOR SHOP ORDER ST40
 def configurador_shop_order_st40():
@@ -3806,70 +3716,20 @@ def obtener_url(url_data_id):
         print(f"[ERROR] obtener_url(): {e}")
         return "FAILED"
 
-############################################################################################################################################
-
-def piece_store2(numPiece,description):
+def obtener_max_attempts():
+    """Obtiene el valor máximo de intentos desde la tabla attempts"""
     try:
+        conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT project_id, pro_key, pro_name FROM project WHERE status_id = 1 LIMIT 1")
-        project = cursor.fetchone()
+        cursor.execute("SELECT attempts FROM atempts ORDER BY attempts_id DESC LIMIT 1")
+        result = cursor.fetchone()
         cursor.close()
-
-        if not project:
-            return "FAILED"
-
-        cursor = conn.cursor()
-        cursor.execute("SELECT model_id, name FROM model WHERE status_id = 1 AND project_id = ?", (project[0],))
-        model = cursor.fetchone()
-        cursor.close()
-
-        if not model:
-            return "FAILED"
-
-        # Desactivar piezas anteriores
-        # cursor = conn.cursor()
-        # cursor.execute("UPDATE part SET status_id = ? WHERE status_id = ?", (2, 1))
-        # conn.commit()
-        # cursor.close()
-
-        # Insertar nueva pieza
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO part (part_number, description, model_id, status_id) VALUES (?, ?, ?, ?)", (numPiece, description, model[0], 3))
-        conn.commit()
-        cursor.close()
-
-        # Exportar a archivo
-        # history_xlsx.history_file_xlsx([numPiece, model[1]])
-
-        return "PASSED"
-
-    except mariadb.Error as e:
-        # print(f"[DB ERROR] {e}")
-        return "FAILED"
+        conn.close()
+        return int(result[0]) if result else 3
     except Exception as e:
-        # print(f"[ERROR] {e}")
-        return "FAILED"
-    
-############################################################################################################################################ 
+        print(f"[ERROR] obtener_max_attempts(): {e}")
+        return 3
 
-################################################################# Obtener Parte2 ############################################################
-
-def obtener_parte2(serial_number):
-     # Obtener part_id
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT part_id, part_number, model_id, create_registration, description FROM part WHERE part_number = %s ORDER BY part_id DESC LIMIT 1",(serial_number,))
-            part = cursor.fetchone()
-        
-        if not part:
-            return "FAILED"
-        
-        
-        return part
-    except Exception as e:
-        print("[ERROR] No se encontraron atributos.")
-        return []
-############################################################################################################################################
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
 # parameters_electrical(['Ct', '50', '10', '100', 'Numeric', 'N', 'OK', 'Comentarios'],name)
@@ -3882,8 +3742,3 @@ def obtener_parte2(serial_number):
 # welding_data(1)
 # atributos()
 # get_urls()
-
-# contador = contador_componentes("P2034365-C0-B:SFY0000TEST001")
-# print(contador[0])
-# component_enabled = configuradorst80() 
-# print(component_enabled[4])

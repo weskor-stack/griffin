@@ -992,6 +992,7 @@ def traceability_station_80(serial_padre, defect_code_default=""):
 
     return payload
 
+
 #ST60
 def traceability_st60(
     serial_padre,
