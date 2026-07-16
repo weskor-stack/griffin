@@ -149,6 +149,7 @@ def interlocking_station_40_empty_data(shop_serial_number, shop_part_number, hea
         "name": "station_id",
         "value": machine_name
     })
+
     unit_information.append({
         "name": "model_id",
         "value": model_id
@@ -158,6 +159,13 @@ def interlocking_station_40_empty_data(shop_serial_number, shop_part_number, hea
         "name": "heatsink_partnumber",
         "value": heatsink_pn
     })
+
+    # Descomentar solo si IT confirma que serialnumber también debe enviarse en empty_data.
+    # Debe ir al final de unit_information.
+    # unit_information.append({
+    #     "name": "serialnumber",
+    #     "value": shop_serial_number
+    # })
 
     interlocking_station_40_empty_data = {
         "serial": shop_serial_number,
@@ -169,12 +177,11 @@ def interlocking_station_40_empty_data(shop_serial_number, shop_part_number, hea
         "test_steps": {
             "unit_information": unit_information
         }
-        
     }
-    # print(json.dumps(interlocking_station_40_empty_data, indent=4))
+
     return interlocking_station_40_empty_data
 
-def interlocking_station_40(serial_number, part_number):
+def interlocking_station_40(serial_number, part_number, heatsink_pn):
     unit_information = []
     configurador = conexion.configurador()
     machine_name = configurador[0]
@@ -193,9 +200,17 @@ def interlocking_station_40(serial_number, part_number):
         "name": "station_id",
         "value": machine_name
     })
+
     unit_information.append({
         "name": "program_id",
         "value": model_id
+    })
+
+    # Este valor viene de Parentage API como component_part_number.
+    # IT confirmó que hacía falta enviarlo cuando Parentage sí trae datos.
+    unit_information.append({
+        "name": "heatsink_partnumber",
+        "value": heatsink_pn
     })
 
     interlocking_station_40 = {
@@ -208,9 +223,8 @@ def interlocking_station_40(serial_number, part_number):
         "test_steps": {
             "unit_information": unit_information
         }
-        
     }
-    # print(json.dumps(interlocking_station_40, indent=4))
+
     return interlocking_station_40
 
 def interlocking_station_100(serial_number, part_number):

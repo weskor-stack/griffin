@@ -2969,6 +2969,57 @@ def insert_configurador_st40(machine_id, client_id, operator, password,
         if conn: conn.rollback()
         raise Exception(f"Fallo al insertar configuración inicial ST40: {e}")
 
+# ===================== Configurador Shop Order ST40 =====================
+def configurador_shop_order_st40():
+    try:
+        conn.commit() 
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT shop_order, qty_components
+            FROM configurador 
+            LIMIT 1
+        """)
+        datos_config = cursor.fetchone()
+        cursor.close()
+
+        # if not datos_config:
+        #     print("[INFO] La tabla configurador está vacía. Esperando la primera inserción.")
+        #     return "No_data"
+            
+        return datos_config
+    except Exception as e:
+        print(f"[ERROR] Error en función configurador(): {e}")
+        return "FAILED"
+
+def update_configurador_shop_order_st40(shop_order, qty_components, conn):
+    try:
+        with conn.cursor() as cursor:
+            sql_update = """
+                UPDATE configurador 
+                SET `shop_order` = ?,
+                    `qty_components` = ?
+            """
+            cursor.execute(sql_update, (shop_order, qty_components))
+            
+            # Si no se actualizó nada, revisamos si la tabla está vacía para insertar
+            if cursor.rowcount == 0:
+                cursor.execute("SELECT COUNT(*) FROM configurador")
+                if cursor.fetchone()[0] == 0:
+                    sql_insert = """
+                        INSERT INTO configurador (
+                            `shop_order`, `qty_components`
+                        ) VALUES (?, ?)
+                    """
+                    cursor.execute(sql_insert, (shop_order, qty_components))
+            
+            conn.commit()
+            return True
+            
+    except Exception as e:
+        conn.rollback()
+        # Lanzamos el error hacia la interfaz gráfica para que aparezca en pantalla
+        raise Exception(f"Fallo en Base de Datos: {e}")
+
 # ===================== Configurador items ST60 (Tabla 2.2 - 5 campos) =====================
 def configurador_st60():
     """Lee los 5 items de configuración de ST60 (Tabla 2.2 del PDF).
@@ -3175,57 +3226,6 @@ def insert_api_by_name_st50_80(api_name, url_data):
         raise Exception(f"Fallo al registrar la API {api_name}: {e}")
     
 
-#CONFIGURADOR SHOP ORDER ST40
-def configurador_shop_order_st40():
-    try:
-        conn.commit() 
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT shop_order, qty_components
-            FROM configurador 
-            LIMIT 1
-        """)
-        datos_config = cursor.fetchone()
-        cursor.close()
-
-        # if not datos_config:
-        #     print("[INFO] La tabla configurador está vacía. Esperando la primera inserción.")
-        #     return "No_data"
-            
-        return datos_config
-    except Exception as e:
-        print(f"[ERROR] Error en función configurador(): {e}")
-        return "FAILED"
-
-def update_configurador_shop_order_st40(shop_order, qty_components, conn):
-    try:
-        with conn.cursor() as cursor:
-            sql_update = """
-                UPDATE configurador 
-                SET `shop_order` = ?,
-                    `qty_components` = ?
-            """
-            cursor.execute(sql_update, (shop_order, qty_components))
-            
-            # Si no se actualizó nada, revisamos si la tabla está vacía para insertar
-            if cursor.rowcount == 0:
-                cursor.execute("SELECT COUNT(*) FROM configurador")
-                if cursor.fetchone()[0] == 0:
-                    sql_insert = """
-                        INSERT INTO configurador (
-                            `shop_order`, `qty_components`
-                        ) VALUES (?, ?)
-                    """
-                    cursor.execute(sql_insert, (shop_order, qty_components))
-            
-            conn.commit()
-            return True
-            
-    except Exception as e:
-        conn.rollback()
-        # Lanzamos el error hacia la interfaz gráfica para que aparezca en pantalla
-        raise Exception(f"Fallo en Base de Datos: {e}")
-    
 def inspection_data4(part_id):
     try:
         with conn.cursor() as cursor:

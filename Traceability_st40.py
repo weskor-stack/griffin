@@ -221,6 +221,17 @@ model_name = StringVar()
 station_name = StringVar()
 piece_name = StringVar()
 
+# Contexto de la pieza actual ST40.
+# Se inicializa para evitar que un FAILED reutilice datos del ciclo anterior.
+SHOP_ORDER_PART_NUMBER = ""
+SHOP_ORDER_SERIAL_NUMBER = ""
+UNIT_PART_NUMBER = ""
+UNIT_SERIAL_NUMBER = ""
+PARENT_PART_NUMBER = ""
+PARENT_SERIAL_NUMBER = ""
+BANDERA = 0
+
+
 # Crear frame principal
 frame = ctk.CTkFrame(master=root)
 frame.pack(pady=30, padx=60, fill="both", expand=True)
@@ -495,10 +506,37 @@ exit_event = threading.Event()
 MAX_LINES = 100
 
 def safe_insert(msg, text_color=None):
-    # Determinar modo actual: "Dark" o "Light"
+    """Inserta mensajes en la UI y fuerza rojo si detecta errores.
+
+    Esto evita que un mensaje con FAILED/ERROR/DENIED se muestre en color normal
+    cuando se olvida pasar text_color="red".
+    """
+    msg_text = str(msg)
+    msg_upper = msg_text.upper()
+
+    palabras_error = [
+        "FAILED",
+        "FAIL",
+        "ERROR",
+        "DENIED",
+        "REJECTED",
+        "EXCEPTION",
+        "TRACEBACK",
+        "DISCONNECTED",
+        "VERIFY DATA",
+        "CONTACT TECHNICAL SUPPORT",
+        "SIN REGISTROS",
+        "NO HAY",
+        "UNIT INFORMATION",
+        "INTERLOCKING API DENIED",
+        "SHOP ORDER SIN REGISTROS",
+    ]
+
+    if any(palabra in msg_upper for palabra in palabras_error):
+        text_color = "red"
+
     mode = ctk.get_appearance_mode().lower()
 
-    # Elegir color adecuado
     if isinstance(text_color, (tuple, list)) and len(text_color) == 2:
         color = text_color[1] if mode == "dark" else text_color[0]
     elif isinstance(text_color, str):
@@ -506,12 +544,92 @@ def safe_insert(msg, text_color=None):
     else:
         color = "white" if mode == "dark" else "black"
 
-    # Limpiar todo el contenido anterior
     texto.configure(state="normal", font=font, text_color=color)
-    texto.delete("1.0", ctk.END)  # Elimina todo
-    texto.insert(ctk.END, msg + "\n")
+    texto.delete("1.0", ctk.END)
+    texto.insert(ctk.END, msg_text + "\n")
     texto.see("end")
     texto.configure(state="disabled")
+
+def limpiar_contexto_st40():
+    """Limpia los datos del ciclo anterior al recibir un nuevo START.
+
+    Esto evita que un START fallido reutilice seriales/part numbers del ciclo anterior
+    al momento de un commit o end_process posterior.
+    """
+    global SHOP_ORDER_PART_NUMBER, SHOP_ORDER_SERIAL_NUMBER, UNIT_PART_NUMBER, UNIT_SERIAL_NUMBER
+    global PARENT_PART_NUMBER, PARENT_SERIAL_NUMBER, BANDERA
+
+    SHOP_ORDER_PART_NUMBER = ""
+    SHOP_ORDER_SERIAL_NUMBER = ""
+    UNIT_PART_NUMBER = ""
+    UNIT_SERIAL_NUMBER = ""
+    PARENT_PART_NUMBER = ""
+    PARENT_SERIAL_NUMBER = ""
+    BANDERA = 0
+
+
+def mostrar_pieza_start(name_piece, origen="START"):
+    """Muestra inmediatamente el serial recibido/escaneado antes de consultar 42Q.
+
+    Antes el serial solo se mostraba al final, cuando Parentage/Unit/Interlocking/Conduit
+    ya habían pasado. Si 42Q respondía FAILED, la barra superior quedaba vacía aunque
+    el PLC o el escáner sí hubieran entregado el serial.
+    """
+    name_piece = str(name_piece or "").strip()
+    if not name_piece:
+        return ""
+
+    try:
+        entry_piece.configure(state="readonly", textvariable=piece_name)
+        piece_name.set(name_piece)
+    except Exception as e:
+        logging.error(f"No se pudo mostrar la pieza en UI: {e}")
+
+    logging.info(f"{origen} - Heatsink SN capturado antes de validar 42Q: {name_piece}")
+    return name_piece
+
+
+def mensaje_unit_information_bloqueado(name_piece, detalle=""):
+    detalle_txt = f"\nDetalle 42Q: {detalle}" if detalle else ""
+    return (
+        f"❌ Unit Information / Interlocking rechazó el Heatsink: {name_piece}"
+        f"{detalle_txt}\n"
+        "Posible causa: el heatsink ya está casado/asociado con una etiqueta en 42Q.\n"
+        "No se enviará JSON de Traceability para evitar registrar una relación incorrecta.\n"
+        "Acción: reimprimir la etiqueta ya asociada o pedir a IT/Sanmina que desasocie/libere el componente."
+    )
+
+
+def asegurar_serialnumber_unit_information(interlocking_payload, serialnumber):
+    """Agrega/actualiza el campo serialnumber dentro de test_steps.unit_information.
+
+    42Q valida este campo dentro del grupo unit_information. Si falta, Interlocking
+    responde: "The values of the following groups has errors: unit_information".
+    """
+    serialnumber = str(serialnumber or "").strip()
+
+    if not isinstance(interlocking_payload, dict):
+        return interlocking_payload
+
+    test_steps = interlocking_payload.setdefault("test_steps", {})
+    unit_information = test_steps.setdefault("unit_information", [])
+
+    if not isinstance(unit_information, list):
+        unit_information = []
+        test_steps["unit_information"] = unit_information
+
+    # Evita duplicar el campo si la función interlocking_json ya lo agrega en el futuro.
+    for item in unit_information:
+        if isinstance(item, dict) and str(item.get("name", "")).strip().lower() == "serialnumber":
+            item["value"] = serialnumber
+            return interlocking_payload
+
+    unit_information.append({
+        "name": "serialnumber",
+        "value": serialnumber
+    })
+
+    return interlocking_payload
 
 
 def worker(conn, addr):
@@ -582,6 +700,7 @@ def worker(conn, addr):
                         if len(option) == 2 and option[-1] == '1/':
                             entry_piece.configure(state=ctk.NORMAL, textvariable=piece_name)
                             piece_name.set("")
+                            limpiar_contexto_st40()
                             safe_insert("You can scan the part.", "green")
                             logging.info(f"You can scan the part.")
 
@@ -629,6 +748,8 @@ def worker(conn, addr):
                                             pass
                                     if len(name_piece) > 27:
                                         conn.settimeout(None)
+                                        name_piece = mostrar_pieza_start(name_piece, "START scan")
+                                        safe_insert(f"🔎 Heatsink recibido: {name_piece}\nValidando Parentage / Unit Information en 42Q...", "blue")
 
                                         # ========== INVOKE API PARENTAGE ==========
                                         safe_insert(f"📡 Calling Parentage API for: {name_piece}", "blue")
@@ -660,8 +781,9 @@ def worker(conn, addr):
                                             response_unit = requests.get(url_api_unit_completa, timeout=30)
 
                                             if response_unit.status_code != 200:
-                                                    logging.error(f"Unit API failed for {name_piece}: {response_unit.status_code}")
-                                                    safe_insert(f"❌ Unit API failed for piece {name_piece}", "red")
+                                                    unit_error_detail = f"HTTP {response_unit.status_code} - {response_unit.text[:500]}"
+                                                    logging.error(f"Unit API failed for {name_piece}: {unit_error_detail}")
+                                                    safe_insert(mensaje_unit_information_bloqueado(name_piece, unit_error_detail), "red")
                                                     conn.send("FAILED".encode('UTF-8'))
                                                     break
                                             
@@ -705,6 +827,10 @@ def worker(conn, addr):
                                                 SHOP_ORDER_PART_NUMBER,
                                                 UNIT_PART_NUMBER
                                             )
+                                            interlocking_json_api = asegurar_serialnumber_unit_information(
+                                                interlocking_json_api,
+                                                SHOP_ORDER_SERIAL_NUMBER
+                                            )
 
                                             logging.info(f"Interlocking JSON: {json.dumps(interlocking_json_api, indent=4)}")
                                             
@@ -725,7 +851,7 @@ def worker(conn, addr):
                                             if not data_interlocking.get("success", False):
                                                 error_msg = data_interlocking.get("message", "Unknown error")
                                                 logging.error(f"Interlocking denied: {error_msg}")
-                                                safe_insert(f"❌ Interlocking API Denied: {error_msg}", "red")
+                                                safe_insert(mensaje_unit_information_bloqueado(name_piece, error_msg), "red")
                                                 conn.send("FAILED".encode('UTF-8'))
                                                 break
 
@@ -770,8 +896,15 @@ Extracted from Unit API - Part Number: {unit_part_number}, Serial Number: {unit_
                                         
                                         part_number_parentage = data_parentage.get("parent_part_number", "")
                                         serial_number_parentage = data_parentage.get("serial_number", "")
+                                        heatsink_pn = data_parentage.get("component_part_number", "")
 
-                                        logging.info(f"Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Number: {serial_number_parentage}")
+                                        if not heatsink_pn:
+                                            safe_insert("❌ Parentage no devolvió component_part_number / heatsink_pn", "red")
+                                            logging.error(f"Parentage sin component_part_number: {json.dumps(data_parentage, indent=4)}")
+                                            conn.send("FAILED".encode("UTF-8"))
+                                            break
+
+                                        logging.info(f"Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Number: {serial_number_parentage}, Heatsink PN: {heatsink_pn}")
 
                                         registros_reales = procesar_registros.verificar_archivos()
                                             
@@ -796,11 +929,16 @@ Extracted from Unit API - Part Number: {unit_part_number}, Serial Number: {unit_
                                         safe_insert(f"   📤 Sending parameters:", "blue")
                                         safe_insert(f"      - Serial Parent: {PARENT_SERIAL_NUMBER}", "blue")
                                         safe_insert(f"      - Part Number Parent: {PARENT_PART_NUMBER}", "blue")
-                                        safe_insert(f"      - Heatsink_pn (unique): {SHOP_ORDER_SERIAL_NUMBER}", "blue")
+                                        safe_insert(f"      - Heatsink PN: {heatsink_pn}", "blue")
                                             
                                         interlocking_json_api = interlocking_json.interlocking_station_40(
                                             SHOP_ORDER_SERIAL_NUMBER,
-                                            PARENT_PART_NUMBER
+                                            PARENT_PART_NUMBER,
+                                            heatsink_pn
+                                        )
+                                        interlocking_json_api = asegurar_serialnumber_unit_information(
+                                            interlocking_json_api,
+                                            SHOP_ORDER_SERIAL_NUMBER
                                         )
 
                                         logging.info(f"Interlocking JSON: {json.dumps(interlocking_json_api, indent=4)}")
@@ -822,7 +960,7 @@ Extracted from Unit API - Part Number: {unit_part_number}, Serial Number: {unit_
                                         if not data_interlocking.get("success", False):
                                             error_msg = data_interlocking.get("message", "Unknown error")
                                             logging.error(f"Interlocking denied: {error_msg}")
-                                            safe_insert(f"❌ Interlocking API Denied: {error_msg}", "red")
+                                            safe_insert(mensaje_unit_information_bloqueado(name_piece, error_msg), "red")
                                             conn.send("FAILED".encode('UTF-8'))
                                             break
 
@@ -937,6 +1075,7 @@ Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Numb
                         elif len(option) == 3 and option[-1] == '1/':
                             entry_piece.configure(state=ctk.NORMAL, textvariable=piece_name)
                             piece_name.set("")
+                            limpiar_contexto_st40()
                             # safe_insert("You can scan the part.", "green")
 
                             green_label.configure(image=image_green_full)
@@ -950,10 +1089,12 @@ Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Numb
                             url_interlocking = url_data[3][0]   # Interlocking API
                             url_conduit = url_data[4][0]        # Conduit API
 
-                            name_piece =option[1]
+                            name_piece = option[1].strip()
 
                             if len(name_piece) > 27:
                                 conn.settimeout(None)
+                                name_piece = mostrar_pieza_start(name_piece, "START PLC")
+                                safe_insert(f"🔎 Heatsink recibido: {name_piece}\nValidando Parentage / Unit Information en 42Q...", "blue")
 
                                 # ========== INVOKE API PARENTAGE ==========
                                 safe_insert(f"📡 Calling Parentage API for: {name_piece}", "blue")
@@ -997,8 +1138,9 @@ Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Numb
                                         break
 
                                     if response_unit.status_code != 200:
-                                        logging.error(f"Unit API failed for {name_piece}: {response_unit.status_code}")
-                                        safe_insert(f"❌ Unit API failed for piece {name_piece}", "red")
+                                        unit_error_detail = f"HTTP {response_unit.status_code} - {response_unit.text[:500]}"
+                                        logging.error(f"Unit API failed for {name_piece}: {unit_error_detail}")
+                                        safe_insert(mensaje_unit_information_bloqueado(name_piece, unit_error_detail), "red")
                                         conn.send("FAILED".encode('UTF-8'))
                                         break
                                             
@@ -1042,6 +1184,10 @@ Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Numb
                                         SHOP_ORDER_PART_NUMBER,
                                         UNIT_PART_NUMBER
                                     )
+                                    interlocking_json_api = asegurar_serialnumber_unit_information(
+                                        interlocking_json_api,
+                                        SHOP_ORDER_SERIAL_NUMBER
+                                    )
 
                                     logging.info(f"Interlocking JSON: {json.dumps(interlocking_json_api, indent=4)}")
                                     try:        
@@ -1067,7 +1213,7 @@ Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Numb
                                     if not data_interlocking.get("success", False):
                                         error_msg = data_interlocking.get("message", "Unknown error")
                                         logging.error(f"Interlocking denied: {error_msg}")
-                                        safe_insert(f"❌ Interlocking API Denied: {error_msg}", "red")
+                                        safe_insert(mensaje_unit_information_bloqueado(name_piece, error_msg), "red")
                                         conn.send("FAILED".encode('UTF-8'))
                                         break
 
@@ -1113,8 +1259,15 @@ Extracted from Unit API - Part Number: {unit_part_number}, Serial Number: {unit_
                                         
                                 part_number_parentage = data_parentage.get("parent_part_number", "")
                                 serial_number_parentage = data_parentage.get("serial_number", "")
+                                heatsink_pn = data_parentage.get("component_part_number", "")
 
-                                logging.info(f"Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Number: {serial_number_parentage}")
+                                if not heatsink_pn:
+                                    safe_insert("❌ Parentage no devolvió component_part_number / heatsink_pn", "red")
+                                    logging.error(f"Parentage sin component_part_number: {json.dumps(data_parentage, indent=4)}")
+                                    conn.send("FAILED".encode("UTF-8"))
+                                    break
+
+                                logging.info(f"Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Number: {serial_number_parentage}, Heatsink PN: {heatsink_pn}")
 
                                 registros_reales = procesar_registros.verificar_archivos()
                                             
@@ -1139,11 +1292,16 @@ Extracted from Unit API - Part Number: {unit_part_number}, Serial Number: {unit_
                                 safe_insert(f"   📤 Sending parameters:", "blue")
                                 safe_insert(f"      - Serial Parent: {PARENT_SERIAL_NUMBER}", "blue")
                                 safe_insert(f"      - Part Number Parent: {PARENT_PART_NUMBER}", "blue")
-                                safe_insert(f"      - Heatsink_pn (unique): {SHOP_ORDER_SERIAL_NUMBER}", "blue")
+                                safe_insert(f"      - Heatsink PN: {heatsink_pn}", "blue")
                                             
                                 interlocking_json_api = interlocking_json.interlocking_station_40(
                                     SHOP_ORDER_SERIAL_NUMBER,
-                                    PARENT_PART_NUMBER
+                                    PARENT_PART_NUMBER,
+                                    heatsink_pn
+                                )
+                                interlocking_json_api = asegurar_serialnumber_unit_information(
+                                    interlocking_json_api,
+                                    SHOP_ORDER_SERIAL_NUMBER
                                 )
 
                                 logging.info(f"Interlocking JSON: {json.dumps(interlocking_json_api, indent=4)}")
@@ -1171,7 +1329,7 @@ Extracted from Unit API - Part Number: {unit_part_number}, Serial Number: {unit_
                                 if not data_interlocking.get("success", False):
                                     error_msg = data_interlocking.get("message", "Unknown error")
                                     logging.error(f"Interlocking denied: {error_msg}")
-                                    safe_insert(f"❌ Interlocking API Denied: {error_msg}", "red")
+                                    safe_insert(mensaje_unit_information_bloqueado(name_piece, error_msg), "red")
                                     conn.send("FAILED".encode('UTF-8'))
                                     break
 
@@ -1350,6 +1508,17 @@ Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Numb
                         url_data = conexion.obtener_url_api()
                         url_traceability = url_data[5][0]
                         if len(option) == 6 and option[-1] == '1/':
+                            if BANDERA == 0:
+                                try:
+                                    conn.send("FAILED".encode('UTF-8'))
+                                except Exception as e:
+                                    safe_insert(f"Error enviando: {e}", "red")
+                                safe_insert(f"Command received-> {cadena}\nSTART no fue validado correctamente en 42Q. No se enviará Traceability JSON.\nCommand FAILED\n", "red")
+                                green_label.configure(image=image_green)
+                                red_label.configure(image=image_red_full)
+                                cadena = ""
+                                continue
+
                             duration = conexion.duration(cadena,option[4])
 
                             if duration == "PASSED":
@@ -1571,6 +1740,16 @@ Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Numb
                                         
                             else:
                                 part_name = entry_piece.get()
+                                if BANDERA == 0:
+                                    safe_insert("Command received-> "+cadena+"\nSTART no fue validado correctamente en 42Q. No se permite COMMIT.\nCommand FAILED\n", "red")
+                                    try:
+                                        conn.send("FAILED".encode('UTF-8'))
+                                    except Exception as e:
+                                        safe_insert(f"Error enviando: {e}", "red")
+                                    green_label.configure(image=image_green)
+                                    red_label.configure(image=image_red_full)
+                                    cadena = ""
+                                    continue
                                 if BANDERA == 1:
                                     commit_options, table_data = commands_st40.commit(cadena, part_name,SHOP_ORDER_SERIAL_NUMBER)
                                 else:
