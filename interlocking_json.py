@@ -85,49 +85,55 @@ def interlocking_station_20(parent_serial_number, parent_part_number, heater_par
     return interlocking_station20
 
 def interlocking_station_50_80(parent_serial_number, parent_part_number, component_pn):
-    unit_information = []
-    configurador = conexion.configurador()
-    machine_id = configurador[0]
-    process_name = configurador[1]
-    operator = configurador[2]
-    station = configurador[3]
-    model_id = configurador[8]
+    configurador = conexion.configuradorst50_80()
 
-    programas = conexion.select_programs()
+    if not configurador or configurador == "FAILED" or len(configurador) < 5:
+        raise Exception("No se pudo obtener configurador ST50-80 desde la base de datos.")
 
-    unit_information.append({
-        "name": "station_id",
-        "value": machine_id
-    })
-    unit_information.append({
-        "name": "model_id",
-        "value": model_id
-    })
+    machine_id = str(configurador[0]).strip()
+    operator = str(configurador[1]).strip()
+    model_id = str(configurador[2]).strip()
+    process_name = str(configurador[3]).strip()
+    shop_order = str(configurador[4]).strip()
 
-    # for x in programas:
-    #     unit_information.append({
-    #         "name": "model_id",
-    #         "value": x[2]
-    #     })
+    if not machine_id or not operator or not model_id or not process_name:
+        raise Exception(
+            f"Configurador ST50-80 incompleto: "
+            f"machine_id={machine_id}, operator={operator}, "
+            f"model_id={model_id}, process_name={process_name}, shop_order={shop_order}"
+        )
 
-    unit_information.append({
-        "name": "component_partnumber",
-        "value": component_pn
-    })
+    unit_information = [
+        {
+            "name": "station_id",
+            "value": machine_id
+        },
+        {
+            "name": "model_id",
+            "value": model_id
+        },
+        {
+            "name": "shop_order",
+            "value": shop_order
+        },
+        {
+            "name": "component_partnumber",
+            "value": component_pn
+        }
+    ]
 
     interlocking_st50_80 = {
         "serial": parent_serial_number,
         "product": parent_part_number,
-        "station": station,
+        "station": machine_id,
         "operator": operator,
         "process_name": process_name,
         "location": "",
         "test_steps": {
             "unit_information": unit_information
         }
-        
     }
-    # print(json.dumps(interlocking_st50_80, indent=4))
+
     return interlocking_st50_80
 
 def interlocking_station_40_empty_data(shop_serial_number, shop_part_number, heatsink_pn):

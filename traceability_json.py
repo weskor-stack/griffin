@@ -138,19 +138,35 @@ def traceability_station_20(serial_number,parent_serial_number, parent_part_numb
 
 def traceability_station_50_80(task_duration, serial_padre, part_number_padre, component_serial, component_part_number, defect_code_default=""):
     config_local = conexion.configuradorst50_80()
-    
-    if config_local and config_local != "FAILED" and len(config_local) >= 6:
-        machine_id = str(config_local[0]).strip()
-        operator_id = str(config_local[1]).strip()
-        process_name = str(config_local[3]).strip()
-        component_name_db = str(config_local[4]).strip()
-        program_version = str(config_local[5]).strip()
-    else:
-        machine_id = "AMC-GENLD97"
-        operator_id = "9999"
-        process_name = "Pressfit"
-        component_name_db = "component"
-        program_version = "default_program"
+
+    if not config_local or config_local == "FAILED" or len(config_local) < 5:
+        raise Exception("No se pudo obtener configurador ST50-80 desde la base de datos.")
+
+    machine_id = str(config_local[0]).strip()
+    operator_id = str(config_local[1]).strip()
+    model_id = str(config_local[2]).strip()
+    process_name = str(config_local[3]).strip()
+    shop_order = str(config_local[4]).strip()
+
+    if not machine_id or not operator_id or not model_id or not process_name:
+        raise Exception(
+            f"Configurador ST50-80 incompleto: "
+            f"machine_id={machine_id}, operator={operator_id}, "
+            f"model_id={model_id}, process_name={process_name}, shop_order={shop_order}"
+        )
+
+    # En ST50/80 configuradorst50_80() regresa 5 datos:
+    # machine_id, operator, model_id, process_name, shop_order.
+    # Se usa model_id como Program ID para evitar valores hardcodeados.
+    component_name_db = "component"
+    program_version = model_id
+
+    print(f"[CONFIG ST50-80 TRACEABILITY] {config_local}")
+    print(f"[TRACEABILITY MACHINE] {machine_id}")
+    print(f"[TRACEABILITY OPERATOR] {operator_id}")
+    print(f"[TRACEABILITY MODEL] {model_id}")
+    print(f"[TRACEABILITY PROCESS] {process_name}")
+    print(f"[TRACEABILITY SHOP ORDER] {shop_order}")
 
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     
@@ -262,7 +278,7 @@ def traceability_station_50_80(task_duration, serial_padre, part_number_padre, c
             "defect_code": step_defect
         })
 
-    program_version = str(program_version).strip() if program_version else "default_program"
+    program_version = str(program_version).strip() if program_version else model_id
 
     payload = {
         "serial": serial_padre,

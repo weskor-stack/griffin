@@ -233,16 +233,35 @@ def select_configurador():
     return data
 
 def obtener_url_api():
-    """Busca la URL en la tabla url_data"""
+    """Busca las URLs en la tabla url_data en un orden fijo."""
+    conn_local = None
+    cursor = None
+
     try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT url_data FROM url_data")
-        #res = cursor.fetchone()
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        cursor.execute("""
+            SELECT url_data
+            FROM url_data
+            ORDER BY url_data_id ASC
+        """)
+
         res = cursor.fetchall()
-        cursor.close()
         return res
-    except:
+
+    except Exception as e:
+        print(f"[ERROR] obtener_url_api(): {e}")
         return None
+
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if conn_local:
+                conn_local.close()
+        except:
+            pass
 
 def insert_attribute(name, unit, upper, lower, value, create_registration):
     cursor = conn.cursor()
@@ -2830,27 +2849,50 @@ def verificar_cantidad_componentes(serial_padre):
 
 #CONFIGURADOR ST50-80
 def configuradorst50_80():
+    """
+    Lee la configuración de ST50/80.
+
+    Retorna:
+    [0] machine_id
+    [1] operator
+    [2] model_id
+    [3] process_name
+    [4] shop_order
+    """
+    conn_local = None
+    cursor = None
+
     try:
-        conn = get_connection() 
-        cursor = conn.cursor()  
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
         sql = """
-            SELECT machine_id, operator, model_id, process_name, shop_order 
-            FROM configurador 
+            SELECT machine_id, operator, model_id, process_name, shop_order
+            FROM configurador
+            ORDER BY configurador_id DESC
             LIMIT 1
         """
+
         cursor.execute(sql)
         registro = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        
+
         if registro:
             return registro
-        else:
-            return ("", "", "", "", "")
-            
+
+        return "FAILED"
+
     except Exception as e:
         print(f"Error en conexion.configuradorst50_80: {e}")
         return "FAILED"
+
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if conn_local:
+                conn_local.close()
+        except:
+            pass
 
 def update_configuratorst50_80(machine_id, operator, model_id, process_name, shop_order):
     try:
@@ -2894,6 +2936,107 @@ def insert_configuratorst50_80(machine_id, operator, model_id, process_name, sho
     except Exception as e:
         if conn: conn.rollback()
         raise Exception(f"Fallo al insertar configuración inicial: {e}")
+
+def preparar_pieza_para_proceso(numPiece):
+    """
+    Prepara una pieza para una nueva corrida de ST50/80.
+
+    Reglas:
+    - Cierra cualquier corrida pendiente anterior del mismo serial: status_id = 3 -> 2.
+    - Intenta crear una nueva corrida activa: status_id = 3.
+    - Si la tabla no permite duplicar part_number, reactiva el último registro existente.
+    """
+    conn_local = None
+    cursor = None
+
+    try:
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        cursor.execute("""
+            SELECT project_id, pro_key, pro_name
+            FROM project
+            WHERE status_id = 1
+            LIMIT 1
+        """)
+        project = cursor.fetchone()
+
+        if not project:
+            print("[ERROR] preparar_pieza_para_proceso(): No hay proyecto activo.")
+            return "FAILED"
+
+        cursor.execute("""
+            SELECT model_id, name
+            FROM model
+            WHERE status_id = 1 AND project_id = ?
+            LIMIT 1
+        """, (project[0],))
+        model = cursor.fetchone()
+
+        if not model:
+            print("[ERROR] preparar_pieza_para_proceso(): No hay modelo activo.")
+            return "FAILED"
+
+        # Cerrar cualquier corrida pendiente anterior del mismo serial.
+        cursor.execute("""
+            UPDATE part
+            SET status_id = 2
+            WHERE part_number = ? AND status_id = 3
+        """, (numPiece,))
+        conn_local.commit()
+
+        # Intentar crear una nueva corrida activa.
+        try:
+            cursor.execute("""
+                INSERT INTO part (part_number, model_id, status_id)
+                VALUES (?, ?, ?)
+            """, (numPiece, model[0], 3))
+            conn_local.commit()
+            print(f"[OK] preparar_pieza_para_proceso(): Nueva corrida creada para {numPiece}")
+            return "PASSED"
+
+        except mariadb.Error as e_insert:
+            # Si part_number es único, reactivamos el último registro existente.
+            print(f"[WARN] preparar_pieza_para_proceso(): No se pudo insertar nueva corrida: {e_insert}")
+            try:
+                conn_local.rollback()
+            except:
+                pass
+
+            cursor.execute("""
+                UPDATE part
+                SET status_id = 3, model_id = ?
+                WHERE part_number = ?
+                ORDER BY part_id DESC
+                LIMIT 1
+            """, (model[0], numPiece))
+            conn_local.commit()
+
+            if cursor.rowcount > 0:
+                print(f"[OK] preparar_pieza_para_proceso(): Pieza existente reactivada para {numPiece}")
+                return "PASSED"
+
+            print(f"[ERROR] preparar_pieza_para_proceso(): No existe pieza para reactivar: {numPiece}")
+            return "FAILED"
+
+    except Exception as e:
+        try:
+            if conn_local:
+                conn_local.rollback()
+        except:
+            pass
+
+        print(f"[ERROR] preparar_pieza_para_proceso(): {e}")
+        return "FAILED"
+
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if conn_local:
+                conn_local.close()
+        except:
+            pass
 
 # ===================== Configurador items ST40 (Tabla 2.2 - 9 campos) =====================
 def configurador_st40():

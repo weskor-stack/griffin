@@ -764,7 +764,7 @@ def worker(conn, addr):
                                     
                                 safe_insert("\n🔗 Dispatching validation schema to Interlocking...", "blue")
                                 
-                                interlocking_json_api = interlocking_json.interlocking_station_20(
+                                interlocking_json_api = interlocking_json.interlocking_station_50_80(
                                     SERIAL_PADRE_GLOBAL,      
                                     PART_NUMBER,       
                                     component_sn 
@@ -806,19 +806,20 @@ def worker(conn, addr):
                                     f"✅ ALL VALIDATIONS PASSED\n Parent: {SERIAL_PADRE_GLOBAL}\n Component: {COMPONENT}"
                                 )
                                 safe_insert(pantalla_final, "green")
-                                
-                                conn.send(f"{name_piece}, PASSED".encode('UTF-8'))
 
-                                parte_existente = conexion.obtener_parte(name_piece)
-                                if parte_existente and parte_existente != "FAILED" and len(parte_existente) > 0:
-                                    safe_insert(f"Pieza ya registrada, omitiendo piece_store.", "blue")
-                                else:
-                                    conexion.piece_store(name_piece)
+                                resultado_part = conexion.preparar_pieza_para_proceso(name_piece)
+
+                                if resultado_part != "PASSED":
+                                    safe_insert(f"❌ No se pudo preparar la pieza {name_piece} para proceso.", "red")
+                                    conn.send("FAILED".encode("UTF-8"))
+                                    break
+
+                                conn.send(f"{name_piece}, PASSED".encode("UTF-8"))
                                 
                                 conexionBitacora.event("SPP-001", f"Parent: {SERIAL_PADRE_GLOBAL}, Component: {COMPONENT}", month, day)
                                 conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
                                 
-                                piece_name.set(COMPONENT if COMPONENT else name_piece)
+                                piece_name.set(SERIAL_PADRE_GLOBAL)
                                 entry_piece.configure(state="readonly")
                                 green_label.configure(image=image_green_full)
                                 break
@@ -906,6 +907,7 @@ def worker(conn, addr):
 
                                 SERIAL_PADRE_GLOBAL = name_piece
                                 PART_NUMBER = part_number_extraido_unit_padre
+                                PART_NUMBER_GLOBAL = part_number_extraido_unit_padre
                                 COMPONENT = scanned_component
                                 component_sn = part_number_extraido_unit_comp
 
@@ -947,13 +949,17 @@ def worker(conn, addr):
                                 safe_insert(pantalla_final, "green")
                                 entry_piece.configure(state="readonly", textvariable=piece_name)
                                 piece_name.set(SERIAL_PADRE_GLOBAL)
-                                conn.send(f"{name_piece}, PASSED".encode('UTF-8'))
 
-                                parte_existente = conexion.obtener_parte(name_piece)
-                                if parte_existente and parte_existente != "FAILED" and len(parte_existente) > 0:
-                                    pass
-                                else:
-                                    conexion.piece_store(name_piece)
+                                # Preparar pieza para una nueva corrida del proceso
+                                resultado_part = conexion.preparar_pieza_para_proceso(name_piece)
+
+                                if resultado_part != "PASSED":
+                                    safe_insert(f"❌ No se pudo preparar la pieza {name_piece} para proceso.", "red")
+                                    conn.send("FAILED".encode("UTF-8"))
+                                    break
+
+                                # Si llegó aquí, la pieza ya tiene un registro activo status_id = 3
+                                conn.send(f"{name_piece}, PASSED".encode("UTF-8"))
 
                                 conexionBitacora.event("SPP-001", f"Parent: {SERIAL_PADRE_GLOBAL}, Component: {COMPONENT}", month, day)
                                 entry_piece.configure(state="readonly", textvariable=piece_name)
