@@ -1242,7 +1242,7 @@ Extracted from Parentage API - Part Number: {part_number_parentage}, Serial Numb
 
                                     # ========== PROCESO EXITOSO ==========
                                     safe_insert(f'''✅✅✅ ALL VALIDATIONS PASSED ✅✅✅\n⚠️ Parentage API returned empty data\n📡 Calling Unit API for piece: {name_piece}\nUnit API response for {name_piece}: {json.dumps(data_unit, indent=4)}\n
-Extracted from Unit API - Part Number: {unit_part_number}, Serial Number: {unit_serial_number}\nInterlocking JSON: {json.dumps(interlocking_json_api, indent=4)}\nResponse: {json.dumps(data_interlocking, indent=4)}\nConduit JSON: {json.dumps(conduit_json_api, indent=4)}\nCONDUIT Response: {json.dumps(conduit_response, indent=2)}''', "green")
+                                    Extracted from Unit API - Part Number: {unit_part_number}, Serial Number: {unit_serial_number}\nInterlocking JSON: {json.dumps(interlocking_json_api, indent=4)}\nResponse: {json.dumps(data_interlocking, indent=4)}\nConduit JSON: {json.dumps(conduit_json_api, indent=4)}\nCONDUIT Response: {json.dumps(conduit_response, indent=2)}''', "green")
                                             
                                     conexion.piece_store(name_piece)
                                     piece = name_piece + ", PASSED"
