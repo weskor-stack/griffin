@@ -312,7 +312,7 @@ def commit(cadena, name_piece):
                         measurementInspection = conexion.parameters_inspection_vs(measurement,options[-3])
                         if measurementInspection != 'GENERAL_ERROR' and measurementInspection != 'FAILED':
                             data_for_table.append([
-                                measurement[0],  # Measurement
+                                measurement[7],  # Measurement
                                 measurement[1],  # Value
                                 measurement[2],  # Lower limit
                                 measurement[3],  # Upper limit
@@ -325,7 +325,7 @@ def commit(cadena, name_piece):
                         positionPx = conexion.parameters_inspection_vs(position_x,options[-3])
                         if positionPx != 'GENERAL_ERROR' and positionPx != 'FAILED':
                             data_for_table.append([
-                                position_x[0],  # Measurement
+                                position_x[7],  # Measurement
                                 position_x[1],  # Value
                                 position_x[2],  # Lower limit
                                 position_x[3],  # Upper limit
@@ -338,7 +338,7 @@ def commit(cadena, name_piece):
                         positionPy = conexion.parameters_inspection_vs(position_y,options[-3])
                         if positionPy != 'GENERAL_ERROR' and positionPy != 'FAILED':
                             data_for_table.append([
-                                position_y[0],  # Measurement
+                                position_y[7],  # Measurement
                                 position_y[1],  # Value
                                 position_y[2],  # Lower limit
                                 position_y[3],  # Upper limit
@@ -376,7 +376,7 @@ def commit(cadena, name_piece):
                     item1 = conexion.parameters_inspection_xt(IT1,options[-3])
                     if item1 != 'GENERAL_ERROR' and item1 != 'FAILED':
                         data_for_table.append([
-                        IT1[0],  # Measurement
+                        IT1[7],  # Measurement
                         IT1[1],  # Value
                         IT1[2],  # Lower limit
                         IT1[3],  # Upper limit
@@ -390,7 +390,7 @@ def commit(cadena, name_piece):
                     item2 = conexion.parameters_inspection_xt(IT2,options[-3])
                     if item2 != 'GENERAL_ERROR' and item2 != 'FAILED':
                         data_for_table.append([
-                        IT2[0],  # Measurement
+                        IT2[7],  # Measurement
                         IT2[1],  # Value
                         IT2[2],  # Lower limit
                         IT2[3],  # Upper limit
@@ -404,7 +404,7 @@ def commit(cadena, name_piece):
                     item3 = conexion.parameters_inspection_xt(IT3,options[-3])
                     if item3 != 'GENERAL_ERROR' and item3 != 'FAILED':
                         data_for_table.append([
-                        IT3[0],  # Measurement
+                        IT3[7],  # Measurement
                         IT3[1],  # Value
                         IT3[2],  # Lower limit
                         IT3[3],  # Upper limit
@@ -419,7 +419,7 @@ def commit(cadena, name_piece):
                     item4 = conexion.parameters_inspection_xt(IT4,options[-3])
                     if item4 != 'GENERAL_ERROR' and item4 != 'FAILED':
                         data_for_table.append([
-                        IT4[0],  # Measurement
+                        IT4[7],  # Measurement
                         IT4[1],  # Value
                         IT4[2],  # Lower limit
                         IT4[3],  # Upper limit
@@ -434,7 +434,7 @@ def commit(cadena, name_piece):
                     item5 = conexion.parameters_inspection_xt(IT5,options[-3])
                     if item5 != 'GENERAL_ERROR' and item5 != 'FAILED':
                         data_for_table.append([
-                        IT5[0],  # Measurement
+                        IT5[7],  # Measurement
                         IT5[1],  # Value
                         IT5[2],  # Lower limit
                         IT5[3],  # Upper limit
@@ -449,7 +449,7 @@ def commit(cadena, name_piece):
                     item6 = conexion.parameters_inspection_xt(IT6,options[-3])
                     if item6 != 'GENERAL_ERROR' and item6 != 'FAILED':
                         data_for_table.append([
-                        IT6[0],  # Measurement
+                        IT6[7],  # Measurement
                         IT6[1],  # Value
                         IT6[2],  # Lower limit
                         IT6[3],  # Upper limit
@@ -465,7 +465,7 @@ def commit(cadena, name_piece):
                     item7 = conexion.parameters_inspection_xt(IT7,options[-3])
                     if item7 != 'GENERAL_ERROR' and item7 != 'FAILED':
                         data_for_table.append([
-                        IT7[0],  # Measurement
+                        IT7[7],  # Measurement
                         IT7[1],  # Value
                         IT7[2],  # Lower limit
                         IT7[3],  # Upper limit
@@ -480,7 +480,7 @@ def commit(cadena, name_piece):
                     item8 = conexion.parameters_inspection_xt(IT8,options[-3])
                     if item8 != 'GENERAL_ERROR' and item8 != 'FAILED':
                         data_for_table.append([
-                        IT8[0],  # Measurement
+                        IT8[7],  # Measurement
                         IT8[1],  # Value
                         IT8[2],  # Lower limit
                         IT8[3],  # Upper limit
@@ -495,7 +495,7 @@ def commit(cadena, name_piece):
                     item9 = conexion.parameters_inspection_xt(IT9,options[-3])
                     if item9 != 'GENERAL_ERROR' and item9 != 'FAILED':
                         data_for_table.append([
-                        IT9[0],  # Measurement
+                        IT9[7],  # Measurement
                         IT9[1],  # Value
                         IT9[2],  # Lower limit
                         IT9[3],  # Upper limit
@@ -510,7 +510,7 @@ def commit(cadena, name_piece):
                     item10 = conexion.parameters_inspection_xt(IT10,options[-3])
                     if item10 != 'GENERAL_ERROR' and item10 != 'FAILED':
                         data_for_table.append([
-                        IT10[0],  # Measurement
+                        IT10[7],  # Measurement
                         IT10[1],  # Value
                         IT10[2],  # Lower limit
                         IT10[3],  # Upper limit
