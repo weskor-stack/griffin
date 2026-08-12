@@ -172,42 +172,50 @@ def commit(cadena, name_piece):
                 # print(angle)
                 # print(px)
                 # print(py)
-                if torque[6] =='PASSED':
-                    result_torque = "PASS"
-                else:
-                    result_torque = "FAIL"
-                
-                if angle[6] =='PASSED':
-                    result_angle = "PASS"
-                else:
-                    result_angle = "FAIL"
-                
-                if px[6] =='PASSED':
-                    result_spx = "PASS"
-                else:
-                    result_spx = "FAIL"
-                
-                if py[6] =='PASSED':
-                    result_spy = "PASS"
-                else:
-                    result_spy = "FAIL"
+
+                def result_visual(bloque):
+                    result_raw = str(bloque[6]).strip().upper()
+
+                    try:
+                        value_float = float(bloque[1])
+                        low_float = float(bloque[2])
+                        high_float = float(bloque[3])
+
+                        if result_raw in ["FAILED", "FAIL", "NOK"]:
+                            return "FAIL"
+
+                        if value_float < low_float or value_float > high_float:
+                            return "FAIL"
+
+                        return "PASS"
+
+                    except Exception:
+                        if result_raw in ["FAILED", "FAIL", "NOK"]:
+                            return "FAIL"
+
+                        return "PASS"
+
+                result_torque = result_visual(torque)
+                result_angle = result_visual(angle)
+                result_spx = result_visual(px)
+                result_spy = result_visual(py)
 
                 if torque[0] == 'T' and angle[0] == 'A' and px[0] == 'PX' and py[0] == 'PY':
-                    torque_measurement = conexion.parameters_screwing(torque,options[-3])
+                    torque_measurement = conexion.parameters_screwing(torque, options[-3])
                     if torque_measurement != 'GENERAL_ERROR' and torque_measurement != 'FAILED':
                         data_for_table.append([
-                            torque[0],# "Torque",  # Measurement
+                            torque[0],  # Measurement
                             torque[1],  # Value
                             torque[2],  # Lower limit
                             torque[3],  # Upper limit
                             torque[4],  # Type
                             torque[5],  # Unit
                             result_torque
-                            # torque[8]   # Result
                         ])
                     elif torque_measurement == 'FAILED':
                         return "FAILED", []
-                    angle_measurement = conexion.parameters_screwing(angle,options[-3])
+
+                    angle_measurement = conexion.parameters_screwing(angle, options[-3])
                     if angle_measurement != 'GENERAL_ERROR' and angle_measurement != 'FAILED':
                         data_for_table.append([
                             angle[0],  # Measurement
@@ -217,11 +225,11 @@ def commit(cadena, name_piece):
                             angle[4],  # Type
                             angle[5],  # Unit
                             result_angle
-                            # angle[8]   # Result
                         ])
                     elif angle_measurement == 'FAILED':
                         return "FAILED", []
-                    px_measurement = conexion.parameters_screwing(px,options[-3])
+
+                    px_measurement = conexion.parameters_screwing(px, options[-3])
                     if px_measurement != 'GENERAL_ERROR' and px_measurement != 'FAILED':
                         data_for_table.append([
                             px[0],  # Measurement
@@ -231,11 +239,11 @@ def commit(cadena, name_piece):
                             px[4],  # Type
                             px[5],  # Unit
                             result_spx
-                            # px[8]   # Result
                         ])
                     elif px_measurement == 'FAILED':
                         return "FAILED", []
-                    py_measurement = conexion.parameters_screwing(py,options[-3])
+
+                    py_measurement = conexion.parameters_screwing(py, options[-3])
                     if py_measurement != 'GENERAL_ERROR' and py_measurement != 'FAILED':
                         data_for_table.append([
                             py[0],  # Measurement
@@ -245,7 +253,6 @@ def commit(cadena, name_piece):
                             py[4],  # Type
                             py[5],  # Unit
                             result_spy
-                            # py[8]   # Result
                         ])
                     elif py_measurement == 'FAILED':
                         return "FAILED", []

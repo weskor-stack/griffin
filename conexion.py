@@ -590,89 +590,198 @@ def parameters_pressfit(element, name_piece):
     # history_xlsx.history_file_xlsx(num_piece)
     return "PASSED"
 
-def parameters_screwing(element, name_piece):
+def obtener_mapa_screwing_measurements():
+    """
+    Lee desde BD las mediciones configuradas para Screwing.
+
+    Permite agregar nuevas keys sin cambiar código, por ejemplo:
+    T, A, PX, PY, RDA.
+    """
+    mapa = {}
+    conexion_local = None
+    cursor = None
+
+    try:
+        conexion_local = get_connection()
+        cursor = conexion_local.cursor()
+        cursor.execute("""
+            SELECT screwing_measurement_id, `key`, name
+            FROM screwing_measurement
+        """)
+
+        for measurement_id, measurement_key, measurement_name in cursor.fetchall():
+            measurement_key = str(measurement_key).strip().upper() if measurement_key is not None else ""
+            measurement_name = str(measurement_name).strip() if measurement_name is not None else ""
+
+            if measurement_key:
+                mapa[measurement_key] = {
+                    "id": measurement_id,
+                    "name": measurement_name
+                }
+
+    except Exception as e:
+        print(f"[ERROR] obtener_mapa_screwing_measurements(): {e}")
+
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if conexion_local:
+                conexion_local.close()
+        except Exception:
+            pass
+
+    return mapa
+
+def parameters_screwing(element, name_piece, operador=None):
     """
     ST60 Screwing.
 
-    element llega desde commands.py con esta forma:
-    [key, value, low_limit, high_limit, data_type, unit, result, metadata, posicion]
+    element llega desde commands.py con esta forma esperada:
+    [key, value, low_limit, high_limit, data_type, unit, result, metadata, numero_tornillo/opcional]
 
     Reglas ST60:
-    - metadata debe ser el nombre real enviado por PLC, por ejemplo: TORQUE TORNILLO_3.
-    - A/PX/PY dummy generados por el normalizador vienen con metadata None y se ignoran.
-    - Se normaliza result a PASS / FAIL para Traceability.
+    - El tipo de medición se toma desde screwing_measurement por `key`.
+      Así se pueden agregar mediciones nuevas como RDA sin hardcodear el ID.
+    - Solo se ignora un bloque si realmente es relleno técnico:
+      metadata vacío/None + result PASS/PASSED/OK + value=0 + low=0 + high=0.
+    - Un valor 0 sí puede ser una medición real fallida si tiene límites reales o result FAIL.
+    - Si el PLC manda PASSED pero el valor está fuera de límites, se guarda como FAIL.
+    - Si metadata es solo un número, se interpreta como número de tornillo.
     """
     import evaluation
     from datetime import datetime, timezone
     import rfc3339
 
+    cursor = None
+
+    def es_vacio_o_cero(valor):
+        try:
+            if valor is None:
+                return True
+
+            valor_str = str(valor).strip().upper()
+
+            if valor_str in ["", "NONE", "NULL", "N/A"]:
+                return True
+
+            return float(valor_str) == 0.0
+
+        except Exception:
+            return False
+
     try:
-        now = datetime.now(timezone.utc).astimezone()
-        test_time = rfc3339.rfc3339(now, utc=True, use_system_timezone=False)
+        if not element or len(element) < 8:
+            print(f"[SCREWING] Elemento inválido: {element}")
+            return "GENERAL_ERROR"
 
-        measurement_key = str(element[0]).strip()
+        measurement_key = str(element[0]).strip().upper()
+        name_piece = str(name_piece).strip()
 
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT screwing_measurement_id, name
-            FROM screwing_measurement
-            WHERE screwing_measurement.key = ?
-        """, (measurement_key,))
-        measurement = cursor.fetchone()
-        cursor.close()
+        mapa_measurements = obtener_mapa_screwing_measurements()
 
-        if not measurement:
-            raise ValueError("Measurement no encontrado para key: " + measurement_key)
+        if measurement_key not in mapa_measurements:
+            print(f"[SCREWING] Medición no configurada en DB: {measurement_key}")
+            # No tumbar la estación por una key desconocida. Solo se ignora.
+            return "PASSED"
+
+        screwing_measurement_id = mapa_measurements[measurement_key]["id"]
+        measurement_name = str(mapa_measurements[measurement_key]["name"]).strip()
 
         cursor = conn.cursor()
         cursor.execute("""
             SELECT station_id, station_key, station_name
             FROM station
             WHERE status_id = 1
+            LIMIT 1
         """)
         station = cursor.fetchone()
         cursor.close()
+        cursor = None
 
         if not station:
-            raise ValueError("No hay estaciones activas")
+            print("[SCREWING] No hay estación activa")
+            return "FAILED"
 
         cursor = conn.cursor()
         cursor.execute(
             """
             SELECT part_id, part_number, model_id
             FROM part
-            WHERE status_id = 3 AND part_number = ?
-            ORDER BY part_id DESC
+            WHERE part_number = ?
+            ORDER BY
+                CASE WHEN status_id = 3 THEN 0 ELSE 1 END,
+                part_id DESC
             LIMIT 1
             """,
             (name_piece,)
         )
         part = cursor.fetchone()
         cursor.close()
+        cursor = None
 
         if not part:
+            print(f"[SCREWING] Parte no encontrada para guardar medición: {name_piece}")
             return "FAILED"
 
         value, low_limit, high_limit, data_type, units, result, metadata = element[1:8]
-
         plc_step_name = str(metadata).strip() if metadata is not None else ""
+        result_raw = str(result).strip().upper()
 
-        # El normalizador mete A/PX/PY dummy con metadata None.
-        # No se guardan en BD y se regresa PASSED para que commands.py no falle.
-        if plc_step_name.upper() in ["", "NONE", "NULL", "N/A"]:
-            print(f"[SCREWING] Medición ignorada. Key={measurement_key} Nombre PLC={plc_step_name}")
+        metadata_vacia = plc_step_name.strip().upper() in ["", "NONE", "NULL", "N/A"]
+        bloque_dummy = (
+            metadata_vacia
+            and result_raw in ["PASS", "PASSED", "OK"]
+            and es_vacio_o_cero(value)
+            and es_vacio_o_cero(low_limit)
+            and es_vacio_o_cero(high_limit)
+        )
+
+        if bloque_dummy:
+            print(f"[SCREWING] Medición dummy ignorada. Key={measurement_key} Nombre PLC={plc_step_name}")
             return "PASSED"
 
-        result_clean = str(result).strip().upper()
-        if result_clean == "PASSED":
-            result_clean = "PASS"
-        elif result_clean == "FAILED":
+        try:
+            value_float = float(value)
+            low_float = float(low_limit)
+            high_float = float(high_limit)
+            fuera_de_limite = value_float < low_float or value_float > high_float
+        except Exception:
+            fuera_de_limite = False
+
+        if result_raw in ["FAILED", "FAIL", "NOK"] or fuera_de_limite:
             result_clean = "FAIL"
+        else:
+            result_clean = "PASS"
 
-        compoperator = evaluation.evaluation(element[1:4])
-        description = plc_step_name
+        try:
+            compoperator = evaluation.evaluation(element[1:4])
+        except Exception:
+            compoperator = "GELE"
 
-        screwing_measurement_id = measurement[0]
+        try:
+            numero_tornillo = str(element[8]).strip()
+        except Exception:
+            numero_tornillo = ""
+
+        measurement_type = measurement_name.upper() if measurement_name else measurement_key
+        comentario_generico = plc_step_name.strip().upper() in [
+            "", "NONE", "NULL", "N/A", "COMENTARIO", "COMMENT", "COMMENTS"
+        ]
+
+        if plc_step_name.isdigit():
+            numero_tornillo = plc_step_name
+            description = f"{measurement_type} TORNILLO_{numero_tornillo}"
+        elif not comentario_generico:
+            description = plc_step_name
+        elif numero_tornillo:
+            description = f"{measurement_type} TORNILLO_{numero_tornillo}"
+        else:
+            description = measurement_type
+
+        now = datetime.now(timezone.utc).astimezone()
+        test_time = rfc3339.rfc3339(now, utc=True, use_system_timezone=False)
+
         station_id = station[0]
         part_id = part[0]
 
@@ -690,18 +799,34 @@ def parameters_screwing(element, name_piece):
             compoperator, test_time, metadata, description,
             screwing_measurement_id, station_id, part_id
         )
+
         cursor.execute(sql, val)
         conn.commit()
         cursor.close()
+        cursor = None
+
+        print(
+            f"[SCREWING] Insertado. Key={measurement_key} "
+            f"Name={measurement_name} Value={value} Low={low_limit} High={high_limit} "
+            f"Result={result_clean} Description={description}"
+        )
 
         return "PASSED"
 
     except mariadb.Error as e:
         print(f"[DB ERROR] parameters_screwing(): {e}")
         return f"[DB ERROR] {e}"
+
     except Exception as e:
         print(f"[GENERAL_ERROR] parameters_screwing(): {e}")
         return "GENERAL_ERROR"
+
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+        except Exception:
+            pass
 
 def parameters_inspection_vs(element, name_piece):
     import evaluation
@@ -3634,19 +3759,20 @@ def weight_store(weight_name,descripcion,parte):
         # print(f"[ERROR] weight_store(): {e}")
         return "FAILED"
     
-def screwing_current_state(serial_padre):
+def obtener_ultimo_id_screwing(serial_padre):
     """
-    Regresa el último estado por medición/description para ST60 Screwing.
+    Devuelve el último parameters_screwing_id existente para este serial
+    justo antes de iniciar el ciclo actual.
 
-    Se usa en end_process para reconstruir el estado actual aunque el PLC
-    solo mande el tornillo que se reintentó.
-
-    Retorna ps.* + sm.key + sm.name.
-    Por eso traceability_json.py puede leer:
-    row[-2] = key técnica, ejemplo T, A, PX, PY
-    row[-1] = nombre, ejemplo Torque, Angles, Position X
+    Se usa para evitar que ST60 tome mediciones viejas de la misma pieza/serial
+    cuando se hacen pruebas repetidas o reprocesos.
     """
+    conn_local = None
+    cursor = None
+
     try:
+        serial_padre = str(serial_padre).strip()
+
         conn_local = get_connection()
         cursor = conn_local.cursor()
 
@@ -3655,7 +3781,9 @@ def screwing_current_state(serial_padre):
             SELECT part_id
             FROM part
             WHERE part_number = ?
-            ORDER BY part_id DESC
+            ORDER BY
+                CASE WHEN status_id = 3 THEN 0 ELSE 1 END,
+                part_id DESC
             LIMIT 1
             """,
             (serial_padre,)
@@ -3663,8 +3791,79 @@ def screwing_current_state(serial_padre):
         part = cursor.fetchone()
 
         if not part:
-            cursor.close()
-            conn_local.close()
+            return 0
+
+        cursor.execute(
+            """
+            SELECT COALESCE(MAX(parameters_screwing_id), 0)
+            FROM parameters_screwing
+            WHERE part_id = ?
+            """,
+            (part[0],)
+        )
+        row = cursor.fetchone()
+
+        return int(row[0]) if row and row[0] is not None else 0
+
+    except Exception as e:
+        print(f"[ERROR] obtener_ultimo_id_screwing(): {e}")
+        return 0
+
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if conn_local:
+                conn_local.close()
+        except Exception:
+            pass
+
+
+def screwing_current_state(serial_padre, desde_id=0):
+    """
+    Recupera el estado actual de Screwing para el ciclo ST60 actual.
+
+    Reglas:
+    - Solo toma registros posteriores al START actual usando desde_id.
+    - Si un tornillo tuvo varios reintentos, toma solo el último registro
+      por description + screwing_measurement_id.
+    - Evita traer historial viejo de la misma pieza/serial.
+
+    Retorna ps.* + sm.key + sm.name.
+    Por eso traceability_json.py puede leer:
+    row[-2] = key técnica, ejemplo T, A, PX, PY, RDA
+    row[-1] = nombre, ejemplo Torque, Angles, Rundown Angle, Position Y
+    """
+    conn_local = None
+    cursor = None
+
+    try:
+        serial_padre = str(serial_padre).strip()
+
+        try:
+            desde_id = int(desde_id or 0)
+        except Exception:
+            desde_id = 0
+
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        cursor.execute(
+            """
+            SELECT part_id
+            FROM part
+            WHERE part_number = ?
+            ORDER BY
+                CASE WHEN status_id = 3 THEN 0 ELSE 1 END,
+                part_id DESC
+            LIMIT 1
+            """,
+            (serial_padre,)
+        )
+        part = cursor.fetchone()
+
+        if not part:
+            print(f"[SCREWING CURRENT STATE] No se encontró part para serial: {serial_padre}")
             return []
 
         part_id = part[0]
@@ -3684,21 +3883,36 @@ def screwing_current_state(serial_padre):
                     MAX(parameters_screwing_id) AS ultimo_id
                 FROM parameters_screwing
                 WHERE part_id = ?
+                  AND parameters_screwing_id > ?
                 GROUP BY description, screwing_measurement_id
             ) ult
                 ON ps.parameters_screwing_id = ult.ultimo_id
+            WHERE ps.part_id = ?
+              AND ps.parameters_screwing_id > ?
             ORDER BY ps.parameters_screwing_id ASC
         """
-        cursor.execute(sql, (part_id,))
+        cursor.execute(sql, (part_id, desde_id, part_id, desde_id))
         rows = cursor.fetchall()
 
-        cursor.close()
-        conn_local.close()
+        print(
+            f"[SCREWING CURRENT STATE] serial={serial_padre} "
+            f"part_id={part_id} desde_id={desde_id} registros={len(rows)}"
+        )
+
         return rows
 
     except Exception as e:
         print(f"[ERROR] screwing_current_state(): {e}")
         return []
+
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if conn_local:
+                conn_local.close()
+        except Exception:
+            pass
 
 
 #Estación 60
@@ -3716,19 +3930,195 @@ def obtener_url(url_data_id):
         print(f"[ERROR] obtener_url(): {e}")
         return "FAILED"
 
-def obtener_max_attempts():
-    """Obtiene el valor máximo de intentos desde la tabla attempts"""
+
+def _st60_timestamp():
+    """Timestamp compatible con el resto de duration()."""
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT attempts FROM atempts ORDER BY attempts_id DESC LIMIT 1")
-        result = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        return int(result[0]) if result else 3
+        import rfc3339
+        from datetime import datetime, timezone
+        task_timestamp = datetime.now(timezone.utc).astimezone()
+        last_digit = str(task_timestamp).split('-')[3]
+        return rfc3339.rfc3339(task_timestamp, utc=True, use_system_timezone=False) + " " + last_digit
+    except Exception:
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def duration_start_st60(station_id, part_id):
+    """
+    Inicia duration para ST60.
+
+    La tabla duration existente usa:
+    station_id, part_id, taskresult, tasktimestamp, taskduration, metadata.
+    Por eso se crea un registro RUNNING y se actualiza al finalizar.
+    """
+    try:
+        # Evitar duplicar RUNNING si el START se repite con la misma pieza.
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT duration_id
+                FROM duration
+                WHERE station_id = ?
+                  AND part_id = ?
+                  AND taskresult = 'RUNNING'
+                  AND metadata = 'ST60_START'
+                ORDER BY duration_id DESC
+                LIMIT 1
+                """,
+                (station_id, part_id)
+            )
+            running_row = cursor.fetchone()
+
+        if running_row:
+            print(f"[DURATION] Ya existe duration RUNNING id={running_row[0]} part_id={part_id}")
+            return "PASSED"
+
+        with conn.cursor() as cursor:
+            sql = """
+                INSERT INTO duration (
+                    station_id, part_id, taskresult,
+                    tasktimestamp, taskduration, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            """
+            cursor.execute(sql, (
+                station_id,
+                part_id,
+                "RUNNING",
+                _st60_timestamp(),
+                "0",
+                "ST60_START"
+            ))
+            conn.commit()
+
+        return "PASSED"
+
     except Exception as e:
-        print(f"[ERROR] obtener_max_attempts(): {e}")
+        print(f"[ERROR] duration_start_st60(): {e}")
+        return "FAILED"
+
+
+def duration_end_st60(station_id, part_id, status):
+    try:
+        status_clean = str(status or "").strip().upper()
+        if status_clean in ["PASSED", "PASS", "OK"]:
+            taskresult = "PASS"
+        elif status_clean in ["FAILED", "FAIL", "NOK"]:
+            taskresult = "FAIL"
+        else:
+            taskresult = status_clean if status_clean else "FAIL"
+
+        duration_id = None
+        start_dt = None
+
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT duration_id, create_registration
+                FROM duration
+                WHERE station_id = ?
+                  AND part_id = ?
+                  AND taskresult = 'RUNNING'
+                  AND metadata = 'ST60_START'
+                ORDER BY duration_id DESC
+                LIMIT 1
+                """,
+                (station_id, part_id)
+            )
+            row = cursor.fetchone()
+
+        if row:
+            duration_id = row[0]
+            start_dt = row[1] if len(row) > 1 else None
+
+        taskduration = "0"
+        try:
+            if start_dt:
+                elapsed = datetime.now() - start_dt
+                taskduration = str(int(elapsed.total_seconds()))
+        except Exception:
+            taskduration = "0"
+
+        if duration_id:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE duration
+                    SET taskresult = ?,
+                        taskduration = ?,
+                        metadata = ?
+                    WHERE duration_id = ?
+                    """,
+                    (taskresult, taskduration, "ST60_END", duration_id)
+                )
+                conn.commit()
+        else:
+            with conn.cursor() as cursor:
+                sql = """
+                    INSERT INTO duration (
+                        station_id, part_id, taskresult,
+                        tasktimestamp, taskduration, metadata
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                """
+                cursor.execute(sql, (
+                    station_id,
+                    part_id,
+                    taskresult,
+                    _st60_timestamp(),
+                    taskduration,
+                    "ST60_END_NO_START"
+                ))
+                conn.commit()
+
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE part SET status_id = ? WHERE part_id = ?",
+                    (2, part_id)
+                )
+                conn.commit()
+        except Exception as e:
+            print(f"[DURATION WARNING] No se pudo actualizar status de part: {e}")
+
+        return "PASSED"
+
+    except Exception as e:
+        print(f"[ERROR] duration_end_st60(): {e}")
+        return "FAILED"
+
+def obtener_max_attempts():
+    """
+    Obtiene el máximo de intentos desde la tabla attempts.
+
+    Si la tabla attempts no existe, no tiene datos o ocurre un error,
+    regresa 3 como respaldo para ST60.
+    """
+    try:
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        cursor.execute("""
+            SELECT attempts
+            FROM attempts
+            LIMIT 1
+        """)
+
+        row = cursor.fetchone()
+
+        cursor.close()
+        conn_local.close()
+
+        if row and row[0] not in [None, ""]:
+            max_attempts = int(row[0])
+
+            if max_attempts > 0:
+                return max_attempts
+
         return 3
+
+    except Exception as e:
+        print(f"[WARNING] obtener_max_attempts(): usando default 3. Error: {e}")
+        return 3
+
 
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)

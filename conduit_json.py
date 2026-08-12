@@ -86,6 +86,71 @@ def conduit_st40(serial_number):
     # print(json.dumps(conduit_json, indent=4))
     return conduit_json
 
+def conduit_st60(
+    process_name,
+    client_id,
+    operator_id,
+    parent_serial_number,
+    program_version,
+    machine_id,
+    status="PASS"
+):
+    """
+    Payload Conduit End ST60.
+
+    Incluye:
+    - ReplaceNontrackedComponent Program_Name_Version
+    - ReplaceNontrackedComponent Machine_ID
+    - End
+
+    Esta función SOLO arma el JSON. No hace POST.
+    """
+
+    status = str(status or "PASS").strip().upper()
+
+    if status in ["PASSED", "PASS", "OK"]:
+        status = "PASS"
+    else:
+        status = "FAIL"
+
+    return {
+        "version": "1.0",
+        "keep_alive": False,
+        "refresh_unit": True,
+        "status": status,
+        "source": {
+            "workstation": {
+                "station": process_name,
+                "type": "Process"
+            },
+            "client_id": client_id,
+            "employee": operator_id,
+            "password": ""
+        },
+        "transactions": [
+            {
+                "unit": {
+                    "unit_id": parent_serial_number
+                },
+                "commands": [
+                    {
+                        "name": "ReplaceNontrackedComponent",
+                        "ref_designator": f"{process_name}_Program_Name_Version",
+                        "component_id": program_version
+                    },
+                    {
+                        "name": "ReplaceNontrackedComponent",
+                        "ref_designator": f"{process_name}_Machine_ID",
+                        "component_id": machine_id
+                    },
+                    {
+                        "name": "End"
+                    }
+                ]
+            }
+        ]
+    }
+
 
 
 # conduit_st40("P1135558-04-A:SANN26097000001")
