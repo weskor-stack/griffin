@@ -992,13 +992,295 @@ def traceability_station_80(serial_padre, defect_code_default=""):
 
     return payload
 
-# if __name__ == "__main__":
-#     resultado_json = traceability_component_station_80(
-#         serial_padre = "P1517040-01-G:REV01:SANN26097000002",
-#         defect_code_default="PLC_DEFAULT_001"
-#     )
-    
-#     if isinstance(resultado_json, dict):
-#         print(json.dumps(resultado_json, indent=4))
-#     else:
-#         print(f"\nError:\n{resultado_json}")
+#ST60
+def traceability_st60(
+    serial_padre,
+    part_number_padre,
+    measurement_key,
+    all_screwing_attempts,
+    atributos_map,
+    now_utc,
+    machine_id,
+    intento_actual=None,
+    operator_id="",
+    process_name="",
+    password=""
+):
+
+    machine_name_payload = str(machine_id or "").strip() or "ST60 PCBA SCREWING"
+    operator_payload = str(operator_id or "").strip()
+    process_name_payload = str(process_name or "").strip()
+    password_payload = str(password or "").strip()
+
+    status_general = "PASS"
+    step_list_dinamico = []
+
+    catalogo_inspecciones = {
+        1: "Torque",
+        2: "Angles",
+        3: "Rundown Angle",
+        4: "Position Y",
+        5: "Rundown Angle"
+    }
+
+    def texto(valor):
+        return str(valor or "").strip()
+
+    def numero(valor, default=0.0):
+        try:
+            if valor in [None, ""]:
+                return default
+            return float(valor)
+        except Exception:
+            return default
+
+    def entero(valor, default=1):
+        try:
+            if valor in [None, ""]:
+                return default
+            return int(float(str(valor).strip()))
+        except Exception:
+            return default
+
+    def status_plc(valor):
+        valor = texto(valor).upper()
+
+        if valor in ["PASS", "PASSED", "OK"]:
+            return "PASS"
+
+        if valor in ["FAIL", "FAILED", "NOK"]:
+            return "FAIL"
+
+        return "FAIL"
+
+    def normalizar_nombre(valor):
+        nombre = texto(valor).lower()
+        nombre = nombre.replace("_", " ").replace("-", " ")
+        nombre = " ".join(nombre.split())
+
+        alias = {
+            "t": "torque",
+            "torque": "torque",
+
+            "a": "angles",
+            "angle": "angles",
+            "angles": "angles",
+            "angulo": "angles",
+            "ángulo": "angles",
+
+            "px": "rundown angle",
+            "position x": "rundown angle",
+            "positionx": "rundown angle",
+            "rda": "rundown angle",
+            "ra": "rundown angle",
+            "rundown": "rundown angle",
+            "rundown angle": "rundown angle",
+            "rundownangle": "rundown angle",
+
+            "py": "position y",
+            "position y": "position y",
+            "positiony": "position y",
+        }
+
+        return alias.get(nombre, nombre)
+
+    def es_comentario_generico(valor):
+        valor = normalizar_nombre(valor)
+        return valor in [
+            "",
+            "none",
+            "null",
+            "n/a",
+            "na",
+            "comentario",
+            "comment",
+            "comments"
+        ]
+
+    def preparar_atributos():
+        mapa = {}
+
+        try:
+            for key, config in (atributos_map or {}).items():
+                candidatos = [key]
+
+                if isinstance(config, dict):
+                    candidatos.append(config.get("name", ""))
+
+                for candidato in candidatos:
+                    key_norm = normalizar_nombre(candidato)
+
+                    if not key_norm:
+                        continue
+
+                    mapa[key_norm] = config
+                    mapa[key_norm.replace(" ", "_")] = config
+                    mapa[key_norm.replace(" ", "")] = config
+
+        except Exception as e:
+            print(f"[TRACEABILITY WARNING] No se pudo preparar atributos ST60: {e}")
+
+        return mapa
+
+    atributos_norm = preparar_atributos()
+
+    def buscar_atributo(*candidatos):
+        for candidato in candidatos:
+            key_norm = normalizar_nombre(candidato)
+
+            posibles_keys = [
+                key_norm,
+                key_norm.replace(" ", "_"),
+                key_norm.replace(" ", "")
+            ]
+
+            for key in posibles_keys:
+                if key in atributos_norm:
+                    return atributos_norm[key]
+
+        return {}
+
+    def obtener_defect_code(config_atributo, valor, low, high):
+        if not isinstance(config_atributo, dict):
+            return ""
+
+        defect_code_low = texto(
+            config_atributo.get("defect_code_low")
+            or config_atributo.get("defect_code")
+            or config_atributo.get("low_defect_code")
+            or config_atributo.get("defect_code_bajo")
+        )
+
+        defect_code_high = texto(
+            config_atributo.get("defect_code_high")
+            or config_atributo.get("high_defect_code")
+            or config_atributo.get("defect_code_alto")
+        )
+
+        if valor < low:
+            return defect_code_low
+
+        if valor > high:
+            return defect_code_high
+
+        return defect_code_low if defect_code_low else defect_code_high
+
+    test_step_actual = entero(intento_actual, 1)
+
+    for row in all_screwing_attempts or []:
+        try:
+            val_medido = numero(row[1])
+            lim_inf_plc = numero(row[2])
+            lim_sup_plc = numero(row[3])
+            unidad = texto(row[5] if len(row) > 5 else "")
+            status_raw = status_plc(row[6] if len(row) > 6 else "FAIL")
+            plc_step_name = texto(row[10] if len(row) > 10 else "")
+
+            measurement_key_db = ""
+            measurement_type = ""
+
+            if len(row) >= 18:
+                measurement_key_db = texto(row[-2])
+                measurement_type = texto(row[-1])
+
+            elif len(row) >= 12:
+                measurement_type = texto(row[11])
+
+            if not measurement_type:
+                id_inspeccion = entero(row[0] if len(row) > 0 else 1, 1)
+                measurement_type = catalogo_inspecciones.get(id_inspeccion, "Torque")
+
+            if normalizar_nombre(measurement_key_db) == "rundown angle":
+                measurement_type = "Rundown Angle"
+
+            if normalizar_nombre(measurement_type) == "rundown angle":
+                measurement_type = "Rundown Angle"
+
+            if es_comentario_generico(plc_step_name):
+                nombre_step = measurement_type
+            elif normalizar_nombre(measurement_type) == "rundown angle":
+                nombre_step = measurement_type
+            else:
+                nombre_step = plc_step_name
+
+            fuera_de_limite = val_medido < lim_inf_plc or val_medido > lim_sup_plc
+
+            if status_raw == "FAIL" or fuera_de_limite:
+                status_step = "FAIL"
+                status_general = "FAIL"
+
+                config_atributo = buscar_atributo(
+                    measurement_type,
+                    nombre_step,
+                    measurement_key_db
+                )
+
+                defect_code = obtener_defect_code(
+                    config_atributo,
+                    val_medido,
+                    lim_inf_plc,
+                    lim_sup_plc
+                )
+
+                if not defect_code:
+                    print(
+                        "[TRACEABILITY WARNING] Sin defect_code ST60: "
+                        f"name={nombre_step}, key={measurement_key_db}, "
+                        f"type={measurement_type}, value={val_medido}, "
+                        f"low={lim_inf_plc}, high={lim_sup_plc}"
+                    )
+
+            else:
+                status_step = "PASS"
+                defect_code = ""
+
+            step_list_dinamico.append({
+                "name": nombre_step,
+                "description": nombre_step,
+                "comparator": "GELE",
+                "lowLimit": lim_inf_plc,
+                "highLimit": lim_sup_plc,
+                "units": unidad,
+                "status": status_step,
+                "value": val_medido,
+                "test_step": test_step_actual,
+                "defect_code": defect_code
+            })
+
+        except Exception as e:
+            print(f"[TRACEABILITY ERROR] Fila Screwing inválida: {e}")
+            continue
+
+    if not step_list_dinamico:
+        status_general = "FAIL"
+
+        step_list_dinamico.append({
+            "name": "NO DATA",
+            "description": "NO DATA",
+            "comparator": "GELE",
+            "lowLimit": 0.0,
+            "highLimit": 0.0,
+            "units": "",
+            "status": "FAIL",
+            "value": 0.0,
+            "test_step": test_step_actual,
+            "defect_code": ""
+        })
+
+    payload = {
+        "serial": serial_padre,
+        "product": part_number_padre,
+        "station": machine_name_payload,
+        "operator": operator_payload,
+        "password": password_payload,
+        "start_time": now_utc,
+        "end_time": now_utc,
+        "measkey": measurement_key,
+        "process_name": process_name_payload,
+        "status": status_general,
+        "test_steps": {
+            f"{machine_name_payload} LIST": step_list_dinamico
+        }
+    }
+
+    return payload
