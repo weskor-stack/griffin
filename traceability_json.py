@@ -851,13 +851,13 @@ def traceability_station_80(serial_padre, defect_code_default=""):
         program_version = "default_program"
 
     now = datetime.now(ZoneInfo("America/Mexico_City"))
-    now_utc = now.strftime("%d-%m-%Y %I:%M:%S %p")
+    now_utc = now.strftime("%d/%m/%Y %I:%M:%S %p")
     fecha = str(parte[3])
     # Convertir la cadena a datetime
-    fecha_dt = datetime.strptime(fecha, "%Y-%m-%d %H:%M:%S")
+    fecha_dt = datetime.strptime(fecha, "%Y/%m/%d %H:%M:%S")
 
     # Dar el formato deseado
-    fecha_formateada = fecha_dt.strftime("%d-%m-%Y %I:%M:%S %p")
+    fecha_formateada = fecha_dt.strftime("%d/%m/%Y %I:%M:%S %p")
     
     atributos = conexion.select_attributes_st50_80()
     atributos_map = {}
