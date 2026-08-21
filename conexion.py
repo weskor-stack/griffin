@@ -656,6 +656,8 @@ def parameters_screwing(element, name_piece):
         conn.commit()
         cursor.close()
 
+        return "PASSED"
+
     except mariadb.Error as e:
         print(f"[DB ERROR] {e}")
         return f"[DB ERROR] {e}"
