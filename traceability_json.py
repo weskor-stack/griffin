@@ -854,7 +854,7 @@ def traceability_station_80(serial_padre, defect_code_default=""):
     now_utc = now.strftime("%d/%m/%Y %I:%M:%S %p")
     fecha = str(parte[3])
     # Convertir la cadena a datetime
-    fecha_dt = datetime.strptime(fecha, "%Y-%m-%d %H:%M:%S")
+    fecha_dt = datetime.strptime(fecha, "%Y/%m/%d %H:%M:%S")
 
     # Dar el formato deseado
     fecha_formateada = fecha_dt.strftime("%d/%m/%Y %I:%M:%S %p")
