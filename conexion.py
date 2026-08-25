@@ -634,7 +634,7 @@ def parameters_screwing(element, name_piece):
             return "FAILED"
         value, low_limit, high_limit, data_type, units, result, metadata = element[1:8]
         compoperator = evaluation.evaluation(element[1:4])
-        description = f"{measurement[1]}_{element[8]}"
+        description = f"{measurement[1]}_Screwing_{element[8]}"
         screwing_measurement_id = measurement[0]
         station_id = station[0]
         part_id = part[0]
@@ -2577,7 +2577,7 @@ def obtener_parte(serial_number):
      # Obtener part_id
     try:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT part_id, part_number, model_id, create_registration FROM part WHERE part_number = %s ORDER BY part_id DESC LIMIT 1",(serial_number,))
+            cursor.execute("SELECT part_id, part_number, model_id, create_registration FROM part WHERE part_number = %s AND status_id = 3 ORDER BY part_id DESC LIMIT 1",(serial_number,))
             part = cursor.fetchone()
         
         if not part:
@@ -3808,6 +3808,279 @@ def obtener_parte2(serial_number):
         print("[ERROR] No se encontraron atributos.")
         return []
 ############################################################################################################################################
+def screwing_current_state(serial_padre, desde_id=0):
+    """
+    Recupera el estado actual de Screwing para el ciclo ST60 actual.
+
+    Reglas:
+    - Solo toma registros posteriores al START actual usando desde_id.
+    - Si un tornillo tuvo varios reintentos, toma solo el último registro
+      por description + screwing_measurement_id.
+    - Evita traer historial viejo de la misma pieza/serial.
+
+    Retorna ps.* + sm.key + sm.name.
+    Por eso traceability_json.py puede leer:
+    row[-2] = key técnica, ejemplo T, A, PX, PY
+    row[-1] = nombre, ejemplo Torque, Angles, Position X
+    """
+    try:
+        serial_padre = str(serial_padre).strip()
+
+        try:
+            desde_id = int(desde_id or 0)
+        except Exception:
+            desde_id = 0
+
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        cursor.execute(
+            """
+            SELECT part_id
+            FROM part
+            WHERE part_number = ?
+            ORDER BY
+                CASE WHEN status_id = 3 THEN 0 ELSE 1 END,
+                part_id DESC
+            LIMIT 1
+            """,
+            (serial_padre,)
+        )
+        part = cursor.fetchone()
+
+        if not part:
+            print(f"[SCREWING CURRENT STATE] No se encontró part para serial: {serial_padre}")
+            cursor.close()
+            conn_local.close()
+            return []
+
+        part_id = part[0]
+
+        sql = """
+            SELECT
+                ps.*,
+                sm.`key` AS measurement_key,
+                sm.name AS measurement_type
+            FROM parameters_screwing ps
+            INNER JOIN screwing_measurement sm
+                ON sm.screwing_measurement_id = ps.screwing_measurement_id
+            INNER JOIN (
+                SELECT
+                    description,
+                    screwing_measurement_id,
+                    MAX(parameters_screwing_id) AS ultimo_id
+                FROM parameters_screwing
+                WHERE part_id = ?
+                  AND parameters_screwing_id > ?
+                GROUP BY description, screwing_measurement_id
+            ) ult
+                ON ps.parameters_screwing_id = ult.ultimo_id
+            WHERE ps.part_id = ?
+              AND ps.parameters_screwing_id > ?
+            ORDER BY ps.parameters_screwing_id ASC
+        """
+        cursor.execute(sql, (part_id, desde_id, part_id, desde_id))
+        rows = cursor.fetchall()
+
+        cursor.close()
+        conn_local.close()
+
+        print(
+            f"[SCREWING CURRENT STATE] serial={serial_padre} "
+            f"part_id={part_id} desde_id={desde_id} registros={len(rows)}"
+        )
+
+        return rows
+
+    except Exception as e:
+        print(f"[ERROR] screwing_current_state(): {e}")
+        return []
+
+def _st60_timestamp():
+    """Timestamp compatible con el resto de duration()."""
+    try:
+        import rfc3339
+        from datetime import datetime, timezone
+        task_timestamp = datetime.now(timezone.utc).astimezone()
+        last_digit = str(task_timestamp).split('-')[3]
+        return rfc3339.rfc3339(task_timestamp, utc=True, use_system_timezone=False) + " " + last_digit
+    except Exception:
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def duration_start_st60(station_id, part_id):
+    """
+    Inicia duration para ST60.
+
+    La tabla duration usa:
+    station_id, part_id, taskresult, tasktimestamp, taskduration, metadata, user_id.
+    Se crea un registro RUN y se actualiza al finalizar.
+    """
+    try:
+        user_id = 9999
+
+        # Evitar duplicar RUN si el START se repite con la misma pieza.
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT duration_id
+                FROM duration
+                WHERE station_id = ?
+                  AND part_id = ?
+                  AND taskresult = 'RUN'
+                  AND metadata = 'ST60_START'
+                ORDER BY duration_id DESC
+                LIMIT 1
+                """,
+                (station_id, part_id)
+            )
+            running_row = cursor.fetchone()
+
+        if running_row:
+            print(f"[DURATION] Ya existe duration RUN id={running_row[0]} part_id={part_id}")
+            return "PASSED"
+
+        with conn.cursor() as cursor:
+            sql = """
+                INSERT INTO duration (
+                    station_id,
+                    part_id,
+                    taskresult,
+                    tasktimestamp,
+                    taskduration,
+                    metadata,
+                    user_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """
+            cursor.execute(sql, (
+                station_id,
+                part_id,
+                "RUN",
+                _st60_timestamp(),
+                "0",
+                "ST60_START",
+                user_id
+            ))
+            conn.commit()
+
+        print(f"[DURATION] Inicio registrado station_id={station_id} part_id={part_id}")
+        return "PASSED"
+
+    except Exception as e:
+        print(f"[ERROR] duration_start_st60(): {e}")
+        return "FAILED"
+
+def duration_end_st60(station_id, part_id, status):
+    try:
+        user_id = 9999
+
+        status_clean = str(status or "").strip().upper()
+        if status_clean in ["PASSED", "PASS", "OK"]:
+            taskresult = "PASS"
+        elif status_clean in ["FAILED", "FAIL", "NOK"]:
+            taskresult = "FAIL"
+        else:
+            taskresult = status_clean if status_clean else "FAIL"
+
+        duration_id = None
+        start_dt = None
+
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT duration_id, create_registration
+                FROM duration
+                WHERE station_id = ?
+                  AND part_id = ?
+                  AND taskresult = 'RUN'
+                  AND metadata = 'ST60_START'
+                ORDER BY duration_id DESC
+                LIMIT 1
+                """,
+                (station_id, part_id)
+            )
+            row = cursor.fetchone()
+
+        if row:
+            duration_id = row[0]
+            start_dt = row[1] if len(row) > 1 else None
+
+        taskduration = "0"
+        try:
+            if start_dt:
+                elapsed = datetime.now() - start_dt
+                taskduration = str(int(elapsed.total_seconds()))
+        except Exception as e:
+            print(f"[DURATION WARNING] No se pudo calcular duración: {e}")
+            taskduration = "0"
+
+        if duration_id:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE duration
+                    SET taskresult = ?,
+                        taskduration = ?,
+                        metadata = ?
+                    WHERE duration_id = ?
+                    """,
+                    (taskresult, taskduration, "ST60_END", duration_id)
+                )
+                conn.commit()
+
+            print(
+                f"[DURATION] Finalizado duration_id={duration_id} "
+                f"part_id={part_id} result={taskresult} duration={taskduration}s"
+            )
+
+        else:
+            with conn.cursor() as cursor:
+                sql = """
+                    INSERT INTO duration (
+                        station_id,
+                        part_id,
+                        taskresult,
+                        tasktimestamp,
+                        taskduration,
+                        metadata,
+                        user_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """
+                cursor.execute(sql, (
+                    station_id,
+                    part_id,
+                    taskresult,
+                    _st60_timestamp(),
+                    taskduration,
+                    "ST60_END_NO_START",
+                    user_id
+                ))
+                conn.commit()
+
+            print(
+                f"[DURATION] Insertado END sin START "
+                f"station_id={station_id} part_id={part_id} result={taskresult}"
+            )
+
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE part SET status_id = ? WHERE part_id = ?",
+                    (2, part_id)
+                )
+                conn.commit()
+
+            print(f"[DURATION] part_id={part_id} actualizado a status_id=2")
+
+        except Exception as e:
+            print(f"[DURATION WARNING] No se pudo actualizar status de part: {e}")
+
+        return "PASSED"
+
+    except Exception as e:
+        print(f"[ERROR] duration_end_st60(): {e}")
+        return "FAILED"
+
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
 # parameters_electrical(['Ct', '50', '10', '100', 'Numeric', 'N', 'OK', 'Comentarios'],name)
@@ -3820,3 +4093,4 @@ def obtener_parte2(serial_number):
 # welding_data(1)
 # atributos()
 # get_urls()
+

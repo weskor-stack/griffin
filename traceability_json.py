@@ -1019,8 +1019,7 @@ def traceability_st60(
         1: "Torque",
         2: "Angles",
         3: "Rundown Angle",
-        4: "Position Y",
-        5: "Rundown Angle"
+        4: "Position Y"
     }
 
     def texto(valor):
@@ -1186,20 +1185,20 @@ def traceability_st60(
             elif len(row) >= 12:
                 measurement_type = texto(row[11])
 
-            if not measurement_type:
-                id_inspeccion = entero(row[0] if len(row) > 0 else 1, 1)
-                measurement_type = catalogo_inspecciones.get(id_inspeccion, "Torque")
+            # if not measurement_type:
+            #     id_inspeccion = entero(row[0] if len(row) > 0 else 1, 1)
+            #     measurement_type = catalogo_inspecciones.get(id_inspeccion, "Torque")
 
-            if normalizar_nombre(measurement_key_db) == "rundown angle":
-                measurement_type = "Rundown Angle"
+            # if normalizar_nombre(measurement_key_db) == "rundown angle":
+            #     measurement_type = "Rundown Angle"
 
-            if normalizar_nombre(measurement_type) == "rundown angle":
-                measurement_type = "Rundown Angle"
+            # if normalizar_nombre(measurement_type) == "rundown angle":
+            #     measurement_type = "Rundown Angle"
 
             if es_comentario_generico(plc_step_name):
                 nombre_step = measurement_type
-            elif normalizar_nombre(measurement_type) == "rundown angle":
-                nombre_step = measurement_type
+            # elif normalizar_nombre(measurement_type) == "rundown angle":
+            #     nombre_step = measurement_type
             else:
                 nombre_step = plc_step_name
 
@@ -1210,10 +1209,11 @@ def traceability_st60(
                 status_general = "FAIL"
 
                 config_atributo = buscar_atributo(
-                    measurement_type,
-                    nombre_step,
-                    measurement_key_db
-                )
+            measurement_type,
+            nombre_step,
+            measurement_key_db,
+            "screwing"
+        )
 
                 defect_code = obtener_defect_code(
                     config_atributo,

@@ -1,4 +1,5 @@
 #servidor
+from types import SimpleNamespace
 import urllib.parse
 import socket
 import threading
@@ -1163,39 +1164,7 @@ def worker(conn, addr):
                                     status_node = res_conduit_json.get("status", {})
                                     if response_conduit.status_code == 200 and status_node.get("code") == "OK":
 
-                                        try:
-                                            MODO_PRUEBA = False 
-                                            if MODO_PRUEBA:
-                                                import random
-                                                MEASUREMENT_KEY_GLOBAL = str(random.randint(10000000, 99999999))
-                                                safe_insert(f"⚠️ [BYPASS ACTIVO] Usando key manual simulada: {MEASUREMENT_KEY_GLOBAL}", "orange")
-                                            else:
-                                                result_data = res_conduit_json["transaction_responses"][0]["command_responses"][0]["results"][0]
-                                                MEASUREMENT_KEY_GLOBAL = str(result_data["data"]["measurement_key"])
-                                                safe_insert(
-                                                    f"✅ Conduit AddMeasurementKey OK.\n"
-                                                    f"✅ measurement_key: {MEASUREMENT_KEY_GLOBAL}\n"
-                                                    f"✅ Serial activo: {SERIAL_PADRE_GLOBAL}\n\n" +
-
-                                                    bloque_json_ui(
-                                                        "INTERLOCKING",
-                                                        request=payload_interlocking,
-                                                        response=data_interlocking
-                                                    ) +
-
-                                                    bloque_json_ui(
-                                                        "CONDUIT ADD MEASUREMENT KEY",
-                                                        request=payload_conduit_amk,
-                                                        response=res_conduit_json
-                                                    ),
-                                                    "green"
-                                                )
-
-                                        except (KeyError, IndexError, TypeError) as e:
-                                            import random
-                                            MEASUREMENT_KEY_GLOBAL = str(random.randint(10000000, 99999999))
-                                            safe_insert(f"⚠️ [BYPASS EMERGENCIA] Estructura inválida ({e}). Key generado: {MEASUREMENT_KEY_GLOBAL}", "orange")
-
+                                        
                                         conn.send(f"{SERIAL_PADRE_GLOBAL}, PASSED".encode('UTF-8'))
 
                                         parte_existente = conexion.obtener_parte(SERIAL_PADRE_GLOBAL)
@@ -1257,13 +1226,6 @@ def worker(conn, addr):
                         elif len(option) >= 3 and option[-1] == '1/':
                             name_piece = str(option[1]).strip()
 
-                            if len(option) >= 4:
-                                scanned_component = str(option[2]).strip()
-                            else:
-                                scanned_component = ""
-
-                            safe_insert(f"Validando via PLC...", "orange")
-
                             try:
                                 if ":" in name_piece:
                                     partes_etiqueta = name_piece.split(":")
@@ -1275,8 +1237,7 @@ def worker(conn, addr):
                                     
                                     SERIAL_PADRE_GLOBAL = str(name_piece).strip()
                                     PART_NUMBER         = PART_NUMBER_GLOBAL
-                                    COMPONENT           = scanned_component if scanned_component else ""
-                                    
+
                                     safe_insert(f"✅ Extracción PLC OK -> PN: {PART_NUMBER_GLOBAL}  Serial: {SERIAL_PADRE_GLOBAL}", "green")
                                 else:
                                     safe_insert("❌ Error: La cadena enviada por el PLC no contiene ':' para separar PN y Serial", "red")
@@ -1284,7 +1245,10 @@ def worker(conn, addr):
                                     break
 
                                 # --- LLAMADA A INTERLOCKING ---
-                                url_interlocking     = conexion.obtener_url(2)
+                                urls = conexion.obtener_url_api()
+
+                                url_interlocking = urls[1][0]
+
                                 payload_interlocking = interlocking_json.interlocking_st60(
                                     parent_serial_number = SERIAL_PADRE_GLOBAL,
                                     parent_part_number   = PART_NUMBER_GLOBAL
@@ -1300,12 +1264,21 @@ def worker(conn, addr):
                                 if not isinstance(data_interlocking, dict):
                                     data_interlocking = {}
 
+                                # interlocking_json = response_interlocking.json()
+
                                 if response_interlocking.status_code != 200 or not data_interlocking.get("success", False):
+                                    conexionBitacora.event("SPP-002","|Command received| "+comando_completo+" part: "+name_piece+" "+str(data_interlocking.get("message", "")),month,day)
+                                    conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+
+                                    safe_insert(f"Command received-> {comando_completo} part: {name_piece}\nCommand FAILED\nUnit API response for {name_piece}: {json.dumps(response_interlocking, indent=4)}\nExtracted from Unit API - Part Number: {PART_NUMBER_GLOBAL}\nInterlocking JSON: {json.dumps(payload_interlocking, indent=4)}\nResponse: {json.dumps(conduit_json, indent=4)}", "red")
+                                    logging.error(f"Command received-> {comando_completo} part: {name_piece}\nCommand FAILED\nUnit API response for {name_piece}: {json.dumps(response_interlocking, indent=4)}\nExtracted from Unit API - Part Number: {PART_NUMBER_GLOBAL}\nInterlocking JSON: {json.dumps(payload_interlocking, indent=4)}\nResponse: {json.dumps(conduit_json, indent=4)}")
+
                                     conn.send("FAILED".encode('UTF-8'))
+
                                     break
 
                                 # --- LLAMADA A CONDUIT ---
-                                url_conduit          = conexion.obtener_url(4)
+                                url_conduit          = urls[3][0]
                                 payload_conduit_amk  = {
                                     "version":      "1.0", "keep_alive": False, "refresh_unit": True,
                                     "source": {
@@ -1329,92 +1302,56 @@ def worker(conn, addr):
                                     timeout=30
                                 )
 
-                                if not isinstance(res_conduit_json, dict):
-                                    res_conduit_json = {}
+                                conduit_json = response_conduit.json()
 
-                                if response_conduit.status_code == 200 and res_conduit_json.get("status", {}).get("code") == "OK":
-
-                                    try:
-                                        MODO_PRUEBA = False 
-                                        if MODO_PRUEBA:
-                                            import random
-                                            MEASUREMENT_KEY_GLOBAL = str(random.randint(10000000, 99999999))
-                                            safe_insert(f"⚠️ [BYPASS ACTIVO] Usando clave de medición simulada: {MEASUREMENT_KEY_GLOBAL}", "orange")
-                                        else:
-                                            result_data = res_conduit_json["transaction_responses"][0]["command_responses"][0]["results"][0]
-                                            MEASUREMENT_KEY_GLOBAL = str(result_data["data"]["measurement_key"])
-                                            safe_insert(
-                                                f"✅ Conduit AddMeasurementKey OK.\n"
-                                                f"✅ measurement_key: {MEASUREMENT_KEY_GLOBAL}\n"
-                                                f"✅ Serial activo: {SERIAL_PADRE_GLOBAL}\n\n" +
-
-                                                bloque_json_ui(
-                                                    "INTERLOCKING",
-                                                    request=payload_interlocking,
-                                                    response=data_interlocking
-                                                ) +
-
-                                                bloque_json_ui(
-                                                    "CONDUIT ADD MEASUREMENT KEY",
-                                                    request=payload_conduit_amk,
-                                                    response=res_conduit_json
-                                                ),
-                                                "green"
-                                            )
-
-                                    except (KeyError, IndexError, TypeError) as e:
-                                        import random
-                                        MEASUREMENT_KEY_GLOBAL = str(random.randint(10000000, 99999999))
-                                        safe_insert(f"⚠️ [BYPASS EMERGENCIA] Estructura inválida ({e}). Key generado: {MEASUREMENT_KEY_GLOBAL}", "orange")
+                                if response_conduit.status_code == 200:
+                                    conduit_json_response = conduit_json.get("transaction_responses", [])
+                                    
+                                    measkey = conduit_json_response[0]["command_responses"][0]["results"][0]["data"]["measurement_key"]
 
                                     entry_piece.configure(state="readonly", textvariable=piece_name)
                                     piece_name.set(SERIAL_PADRE_GLOBAL)
-                                    conn.send(f"{SERIAL_PADRE_GLOBAL}, PASSED".encode('UTF-8'))
-
+    
                                     parte_existente = conexion.obtener_parte(SERIAL_PADRE_GLOBAL)
-                                    if not parte_existente or parte_existente == "FAILED":
-                                        conexion.piece_store(SERIAL_PADRE_GLOBAL)
+                                    if parte_existente == "FAILED":
+                                        conexion.piece_store2(SERIAL_PADRE_GLOBAL,measkey)
 
-                                    try:
-                                        if hasattr(conexion, "obtener_ultimo_id_screwing"):
-                                            START_SCREWING_ID_GLOBAL = conexion.obtener_ultimo_id_screwing(SERIAL_PADRE_GLOBAL)
-                                        else:
-                                            START_SCREWING_ID_GLOBAL = 0
+                                    conn.send(f"PASSED".encode('UTF-8'))
+                                    conexionBitacora.event("SPP-001",f"|Command received| {comando_completo} part: {name_piece} - Route check passed", month,day)
+                                    conexionBitacora.event("CHKROUTE-001",f"Route check passed for ISN: {name_piece}",month, day)
+                                    conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
 
-                                        print(
-                                            f"[CICLO ST60] Inicio de ciclo. "
-                                            f"Último ID Screwing previo: {START_SCREWING_ID_GLOBAL}"
-                                        )
+                                    safe_insert(f'''Command received-> {comando_completo} \npart: {name_piece}\nCommand PASSED\n
+                                    Unit API response for {name_piece}: {json.dumps(conduit_json, indent=4)}\n
+                                    Extracted from Unit API - Part Number: {PART_NUMBER_GLOBAL}\n
+                                    Interlocking JSON: {json.dumps(payload_interlocking, indent=4)}\n
+                                    Conduit JSON: {json.dumps(payload_conduit_amk, indent=4)}''', "green")
 
-                                    except Exception as e:
-                                        START_SCREWING_ID_GLOBAL = 0
-                                        print(f"[CICLO ST60 WARNING] No se pudo obtener último ID Screwing: {e}")
+                                    logging.info(f'''Command received-> {comando_completo} \npart: {name_piece}\nCommand PASSED\n
+                                    Unit API response for {name_piece}: {json.dumps(conduit_json, indent=4)}\n
+                                    Extracted from Unit API - Part Number: {PART_NUMBER_GLOBAL}\n
+                                    Interlocking JSON: {json.dumps(payload_interlocking, indent=4)}\n
+                                    Conduit JSON: {json.dumps(payload_conduit_amk, indent=4)}''')
 
-                                    try:
-                                        parte_actual = conexion.obtener_parte(SERIAL_PADRE_GLOBAL)
-                                        station_actual = conexion.stations()
-
-                                        if parte_actual and parte_actual != "FAILED" and station_actual:
-                                            part_id = parte_actual[0]
-                                            station_id = station_actual[0]
-
-                                            if hasattr(conexion, "duration_start_st60"):
-                                                conexion.duration_start_st60(station_id, part_id)
-
-                                            print(f"[DURATION] Inicio registrado station_id={station_id} part_id={part_id}")
-
-                                    except Exception as e:
-                                        print(f"[DURATION WARNING] No se pudo iniciar duration: {e}")
-
-                                    conexionBitacora.event("SPP-001", f"Parent: {SERIAL_PADRE_GLOBAL}", month, day)
+                                    green_label.configure(image=image_green_full)
+                                    red_label.configure(image=image_red)
                                     break
                                 else:
+                                    conexionBitacora.event("SPP-002","|Command received| "+comando_completo+" part: "+name_piece,month,day)
+                                    conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+
+                                    green_label.configure(image=image_green)
+                                    red_label.configure(image=image_red_full)
+
+                                    safe_insert(f"Command received-> {comando_completo} part: {name_piece}\nCommand FAILED\nUnit API response for {name_piece}: {json.dumps(response_conduit, indent=4)}\nExtracted from Unit API - Part Number: {PART_NUMBER_GLOBAL}\nInterlocking JSON: {json.dumps(interlocking_json, indent=4)}\nResponse: {json.dumps(conduit_json, indent=4)}\nConduit JSON: {json.dumps(payload_conduit_amk, indent=4)}", "red")
+                                    logging.error(f"Command received-> {comando_completo} part: {name_piece}\nCommand FAILED\nUnit API response for {name_piece}: {json.dumps(response_conduit, indent=4)}\nExtracted from Unit API - Part Number: {PART_NUMBER_GLOBAL}\nInterlocking JSON: {json.dumps(interlocking_json, indent=4)}\nResponse: {json.dumps(conduit_json, indent=4)}\nConduit JSON: {json.dumps(payload_conduit_amk, indent=4)}")
                                     conn.send("FAILED".encode('UTF-8'))
                                     break
 
                             except Exception as e:
                                 safe_insert(f"❌ Exception: {str(e)}", "red")
                                 logging.error(f"Error en case start PLC: {str(e)}")
+                                conn.send("FAILED".encode('UTF-8'))
                                 break
                         cadena = ""
 
@@ -1540,18 +1477,14 @@ def worker(conn, addr):
                                 )
 
                             # Obtener URLs
-                            url_traceability = conexion.obtener_url(3)
-                            url_conduit = conexion.obtener_url(4)
-
-                            if not url_traceability:
+                            urls = conexion.obtener_url_api()
+                            if urls == None:
                                 safe_insert("[END PROCESS] No se encontró URL de Traceability\n", "red")
                                 conn.send("FAILED".encode("UTF-8"))
                                 break
 
-                            if not url_conduit:
-                                safe_insert("[END PROCESS] No se encontró URL de Conduit\n", "red")
-                                conn.send("FAILED".encode("UTF-8"))
-                                break
+                            url_traceability = urls[2][0]
+                            url_conduit = urls[3][0]
 
                             # Máximo de intentos ST60
                             # Primero intenta tomarlo desde DB.
@@ -1669,11 +1602,13 @@ def worker(conn, addr):
                             # Fecha UTC para Traceability
                             now_utc = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
+                            measkey_data = conexion.obtener_parte2(option[-2])
+                            measkey_data = measkey_data[4]
                             # Crear JSON Traceability
                             payload_traceability = traceability_json.traceability_st60(
                                 serial_padre=SERIAL_PADRE_GLOBAL,
                                 part_number_padre=PART_NUMBER_GLOBAL,
-                                measurement_key=MEASUREMENT_KEY_GLOBAL,
+                                measurement_key=measkey_data,
                                 all_screwing_attempts=all_screwing_attempts,
                                 atributos_map=atributos_map,
                                 now_utc=now_utc,
@@ -2094,7 +2029,7 @@ def worker(conn, addr):
                                     "orange"
                                 )
                                         try:
-                                            conn.send("START-AGAIN".encode("UTF-8"))
+                                            conn.send("PASSED".encode("UTF-8"))
                                         except Exception as e:
                                             safe_insert(f"Error enviando: {e}", "red")
 
@@ -2226,7 +2161,7 @@ def worker(conn, addr):
                                             safe_insert(f"Error enviando: {e}", "red")
 
                                         try:
-                                            conn.send("RELEASE_PIECE, FAILED".encode("UTF-8"))
+                                            conn.send("FAILED".encode("UTF-8"))
                                         except Exception as e:
                                             safe_insert(f"Error enviando RELEASE_PIECE FAILED: {e}", "red")
 
@@ -2352,11 +2287,6 @@ def worker(conn, addr):
                                     try:
                                         conn.send("PASSED".encode("UTF-8"))
                                     except Exception as e:
-                                        safe_insert(f"Error enviando: {e}", "red")
-
-                                    try:
-                                        conn.send("RELEASE_PIECE, PASSED".encode("UTF-8"))
-                                    except Exception as e:
                                         safe_insert(f"Error enviando RELEASE_PIECE PASSED: {e}", "red")
 
                                     try:
@@ -2416,11 +2346,6 @@ def worker(conn, addr):
 
                                         try:
                                             conn.send("PASSED".encode("UTF-8"))
-                                        except Exception as e:
-                                            safe_insert(f"Error enviando: {e}", "red")
-
-                                        try:
-                                            conn.send("RELEASE_PIECE, PASSED".encode("UTF-8"))
                                         except Exception as e:
                                             safe_insert(f"Error enviando RELEASE_PIECE PASSED: {e}", "red")
 
