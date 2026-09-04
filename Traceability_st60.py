@@ -10,6 +10,7 @@ from CustomTkinterMessagebox import *
 from tkinter import StringVar, messagebox 
 import tkinter.messagebox as tkmsg
 from CTkTable import *
+from sqlalchemy import case
 # PC name
 import conduit_json
 import get_name_PC
@@ -129,344 +130,6 @@ def post_api_debug(nombre_api, url, payload, timeout=30):
 
     return response, response_data
 
-
-def conduit_ok(response, response_json):
-    """
-    Valida una respuesta de Conduit.
-    Importante: HTTP 200/201 no siempre significa que el comando interno fue OK.
-    """
-    try:
-        if response.status_code not in [200, 201]:
-            return False
-
-        if not isinstance(response_json, dict):
-            return False
-
-        status_node = response_json.get("status", {})
-        if isinstance(status_node, dict):
-            code = str(status_node.get("code", "")).strip().upper()
-            if code and code != "OK":
-                return False
-
-        transaction_responses = response_json.get("transaction_responses", [])
-        if transaction_responses:
-            for transaction in transaction_responses:
-                command_responses = transaction.get("command_responses", [])
-
-                for command_response in command_responses:
-                    command_status = command_response.get("status", {})
-                    if isinstance(command_status, dict):
-                        code = str(command_status.get("code", "")).strip().upper()
-                        if code and code != "OK":
-                            return False
-
-                    results = command_response.get("results", [])
-                    for result in results:
-                        result_status = str(result.get("status", "")).strip().upper()
-                        if result_status and result_status != "OK":
-                            return False
-
-        return True
-
-    except Exception as e:
-        print(f"[WARNING] Error validando Conduit: {e}")
-        return False
-
-
-def traceability_tiene_step_fail(payload_traceability):
-    """Revisa si el payload de Traceability tiene al menos una medición FAIL/FAILED."""
-    try:
-        steps_dict = payload_traceability.get("test_steps", {})
-        steps_list = []
-
-        for _, lista in steps_dict.items():
-            if isinstance(lista, list):
-                steps_list.extend(lista)
-
-        return any(
-            str(step.get("status", "")).strip().upper() in ["FAIL", "FAILED", "NOK"]
-            for step in steps_list
-        )
-
-    except Exception as e:
-        print(f"[WARNING] Error revisando steps de Traceability: {e}")
-        return False
-
-
-def normalizar_commit_screwing_st60(cadena_original):
-    """
-    Normaliza commits Screwing ST60.
-
-    Soporta:
-    1) Cadena completa:
-       commit,Screwing,T,...,A,...,PX,...,PY,...,4,SERIAL,1/
-
-    2) Cadena parcial:
-       commit,Screwing,T,...,Comentario,,,,,,,,,,,,,,,,,,,,,,,,,4,SERIAL,1/
-
-    En el caso parcial, completa A/PX/PY como dummy para que commands.py no falle.
-    El número antes del serial se respeta como número de tornillo.
-    """
-
-    cadena_original = str(cadena_original).strip()
-
-    if not cadena_original.startswith("commit,Screwing,"):
-        return cadena_original
-
-    # Cortar exactamente hasta 1/
-    if "1/" in cadena_original:
-        cadena_original = cadena_original[:cadena_original.index("1/") + 2]
-
-    clean = cadena_original.rstrip(",")
-    options = clean.split(",")
-
-    if len(options) < 10:
-        return cadena_original
-
-    # Buscar serial y número de tornillo
-    serial = ""
-    numero_tornillo = ""
-
-    serial_index = -1
-
-    for i in range(len(options) - 1, -1, -1):
-        item = str(options[i]).strip()
-
-        if ":" in item and item != "1/":
-            serial = item
-            serial_index = i
-            break
-
-    if not serial:
-        print("[NORMALIZAR SCREWING] No se encontró serial en la cadena.")
-        return cadena_original
-
-    if serial_index > 0:
-        numero_tornillo = str(options[serial_index - 1]).strip()
-
-    if not numero_tornillo:
-        numero_tornillo = "1"
-
-    # Si ya viene completa con T, A, PX, PY, solo asegurar coma final
-    try:
-        if (
-            len(options) >= 37
-            and options[2].strip().upper() == "T"
-            and options[10].strip().upper() == "A"
-            and options[18].strip().upper() == "PX"
-            and options[26].strip().upper() == "PY"
-        ):
-            print("[NORMALIZAR SCREWING] Cadena completa detectada, se respeta estructura original.")
-            return clean + ","
-    except Exception:
-        pass
-
-    # Tomar bloque T real
-    torque = options[2:10]
-
-    if len(torque) != 8:
-        print(f"[NORMALIZAR SCREWING] Bloque torque inválido: {torque}")
-        return cadena_original
-
-    if str(torque[0]).strip().upper() != "T":
-        print(f"[NORMALIZAR SCREWING] La medición inicial no es T: {torque[0]}")
-        return cadena_original
-
-    # Bloques dummy para que commands.py reciba la estructura completa
-    angle = ["A", "0", "0", "0", "Numeric", "degrees", "PASSED", "None"]
-    px    = ["PX", "0", "0", "0", "Numeric", "mm", "PASSED", "None"]
-    py    = ["PY", "0", "0", "0", "Numeric", "mm", "PASSED", "None"]
-
-    nueva = (
-        ["commit", "Screwing"]
-        + torque
-        + angle
-        + px
-        + py
-        + [numero_tornillo, serial, "1/", ""]
-    )
-
-    cadena_normalizada = ",".join(nueva)
-
-    print("[NORMALIZAR SCREWING] Cadena parcial normalizada:")
-    print(cadena_normalizada)
-    print(f"[NORMALIZAR SCREWING] Tornillo={numero_tornillo}")
-    print(f"[NORMALIZAR SCREWING] len={len(cadena_normalizada.split(','))}")
-
-    return cadena_normalizada
-
-
-def obtener_keys_reales_screwing(cadena_commit):
-    """
-    Detecta qué mediciones fueron realmente enviadas por el PLC.
-
-    Cada bloque Screwing tiene 8 campos:
-    key,value,low,high,type,unit,result,metadata
-
-    Se ignora solo si:
-    - metadata viene vacío / None / NULL / N/A
-    - value, low y high vienen vacíos o 0
-    """
-
-    keys_reales = set()
-
-    def es_vacio_o_cero(valor):
-        try:
-            if valor is None:
-                return True
-
-            valor_str = str(valor).strip().upper()
-
-            if valor_str in ["", "NONE", "NULL", "N/A"]:
-                return True
-
-            return float(valor_str) == 0.0
-
-        except Exception:
-            return False
-
-    try:
-        clean = str(cadena_commit).strip().rstrip(",")
-        options = clean.split(",")
-
-        if len(options) < 10:
-            return keys_reales
-
-        bloques = [
-            options[2:10],    # T
-            options[10:18],   # A
-            options[18:26],   # PX
-            options[26:34],   # PY
-        ]
-
-        for bloque in bloques:
-            if len(bloque) != 8:
-                continue
-
-            key = str(bloque[0]).strip().upper()
-            value = bloque[1]
-            low_limit = bloque[2]
-            high_limit = bloque[3]
-            metadata = str(bloque[7]).strip().upper()
-
-            metadata_vacia = metadata in ["", "NONE", "NULL", "N/A"]
-
-            bloque_dummy = (
-                metadata_vacia and
-                es_vacio_o_cero(value) and
-                es_vacio_o_cero(low_limit) and
-                es_vacio_o_cero(high_limit)
-            )
-
-            if not bloque_dummy:
-                keys_reales.add(key)
-
-    except Exception as e:
-        print(f"[WARNING] Error detectando keys reales Screwing: {e}")
-
-    return keys_reales
-
-
-def filtrar_table_data_screwing(table_data, cadena_commit):
-    """
-    Filtra la tabla visual para mostrar solo mediciones reales del PLC.
-
-    Ejemplo:
-    - Si el PLC solo manda T, la UI solo muestra T.
-    - Si después manda T/A/PX/PY con metadata real, también aparecen.
-    """
-    if not table_data:
-        return table_data
-
-    keys_reales = obtener_keys_reales_screwing(cadena_commit)
-    print(f"[DEBUG TABLE] Keys reales Screwing: {keys_reales}")
-
-    if not keys_reales:
-        return table_data
-
-    table_filtrada = []
-
-    for row in table_data:
-        try:
-            measurement = str(row[0]).strip().upper()
-
-            if measurement in keys_reales:
-                table_filtrada.append(row)
-
-        except Exception:
-            pass
-
-    return table_filtrada
-
-
-def commit_screwing_tiene_falla(cadena_commit):
-    """
-    Detecta si una cadena commit,Screwing trae una medición real FAILED.
-
-    commands.commit() puede regresar PASSED cuando el guardado en BD fue correcto,
-    pero eso no significa que la medición haya pasado. Esta función solo sirve
-    para mostrar en UI/bitácora que la medición falló; el PLC debe recibir PASSED
-    si el comando commit fue procesado correctamente.
-    """
-
-    def es_vacio_o_cero(valor):
-        try:
-            if valor is None:
-                return True
-
-            valor_str = str(valor).strip().upper()
-
-            if valor_str in ["", "NONE", "NULL", "N/A"]:
-                return True
-
-            return float(valor_str) == 0.0
-
-        except Exception:
-            return False
-
-    try:
-        clean = str(cadena_commit).strip().rstrip(",")
-        options = clean.split(",")
-
-        bloques = [
-            options[2:10],    # T
-            options[10:18],   # A
-            options[18:26],   # PX
-            options[26:34],   # PY
-        ]
-
-        for bloque in bloques:
-            if len(bloque) != 8:
-                continue
-
-            key = str(bloque[0]).strip().upper()
-            value = bloque[1]
-            low_limit = bloque[2]
-            high_limit = bloque[3]
-            result = str(bloque[6]).strip().upper()
-            metadata = str(bloque[7]).strip().upper()
-
-            metadata_vacia = metadata in ["", "NONE", "NULL", "N/A"]
-
-            bloque_dummy = (
-                metadata_vacia and
-                es_vacio_o_cero(value) and
-                es_vacio_o_cero(low_limit) and
-                es_vacio_o_cero(high_limit)
-            )
-
-            if bloque_dummy:
-                continue
-
-            if result in ["FAILED", "FAIL", "NOK"]:
-                print(f"[SCREWING COMMIT] Falla detectada en {key}")
-                return True
-
-        return False
-
-    except Exception as e:
-        print(f"[WARNING] Error revisando falla Screwing commit: {e}")
-        return False
 
 
 def configurar_logging():
@@ -982,55 +645,45 @@ def worker(conn, addr):
 
                     case "start":
                         entry_piece.focus_set()
+
                         clear_table_data()
-                        COMPONENT = ""
-                        scanned_component = ""
-
-                        config_local = conexion.configurador_st60()
-                        if config_local and config_local != "FAILED" and len(config_local) >= 5:
-                            program_version = str(config_local[0]).strip()
-                            machine_id      = str(config_local[1]).strip()
-                            process_name    = str(config_local[2]).strip()
-                            client_id_db    = str(config_local[3]).strip()
-                            operator_id     = str(config_local[4]).strip()
-                        else:
-                            machine_id      = ""
-                            operator_id     = ""
-                            process_name    = ""
-                            client_id_db    = ""
-                            program_version = ""
-
-                        interlocking_ok = False
+                        urls = conexion.obtener_url_api()
+                        url_interlocking = urls[1][0]
+                        url_conduit = urls[3][0]
 
                         if len(option) == 2 and option[-1] == '1/':
                             entry_piece.configure(state=ctk.NORMAL, textvariable=piece_name)
                             piece_name.set("")
-                            safe_insert("🔍 SCAN: Scan Heatsink Label (PN:SERIAL)", "green")
+                            safe_insert("You can scan the part.", "green")
+                            logging.info(f"You can scan the part.")
+
                             green_label.configure(image=image_green_full)
                             red_label.configure(image=image_red)
 
                             try:
-                                start_time_scan = time.time()
-                                heatsink_scanned = False
-                                error_detectado  = False
-
-                                while not heatsink_scanned:
-                                    name_piece   = entry_piece.get().strip()
+                                start_time = time.time()
+                                while True:
+                                    name_piece = entry_piece.get()
                                     time.sleep(0.05)
-                                    elapsed_time = time.time() - start_time_scan
 
+                                    elapsed_time = time.time() -  start_time
                                     if len(name_piece) == 0:
-                                        if elapsed_time >= 240:
+                                        conn.settimeout(None)
+                                        if elapsed_time >= 240: #4 minutos
                                             entry_piece.configure(state="readonly", textvariable=piece_name)
                                             piece_name.set("")
-                                            safe_insert("Timeout waiting for Heatsink scan.", "red")
-                                            conn.send("reset".encode('UTF-8'))
-                                            error_detectado = True
+                                            safe_insert("Start the process again.")
+                                            logging.info("Start the process again.")
+                                            try:
+                                                conn.send("START-AGAIN".encode('UTF-8'))
+                                            except Exception as e:
+                                                safe_insert(f"Error enviando: {e}", "red")
+                                                logging.error(f"Error enviando: {e}")
+                                            contador = 0
                                             break
-                                        continue
-
-                                    if len(name_piece) > 13:
-                                        entry_piece.configure(state="disabled")
+                                        else:
+                                            pass
+                                    if len(name_piece) > 27:
 
                                         if ":" in name_piece:
                                             partes_etiqueta = name_piece.split(":")
@@ -1044,227 +697,226 @@ def worker(conn, addr):
                                             PART_NUMBER         = PART_NUMBER_GLOBAL
                                             
                                             safe_insert(f"✅ Extracción Manual OK -> PN: {PART_NUMBER_GLOBAL}  Serial: {SERIAL_PADRE_GLOBAL}", "green")
-                                            heatsink_scanned = True
+
+                                            piece = name_piece + ", PASSED"
+                                            entry_piece.configure(state="readonly", textvariable=piece_name)
+                                            piece_name.set(name_piece)
+
+                                            ##################################################### Json para enviar al endpoint Interlocking ##############################################################                                           
+                                            if not url_interlocking or url_interlocking == "FAILED":
+                                                safe_insert("❌ Error obteniendo URL Interlocking de DB.", "red")
+                                                conn.send("FAILED".encode('UTF-8'))
+                                                green_label.configure(image=image_green)
+                                                red_label.configure(image=image_red_full)
+                                                break
+            
+                                            payload_interlocking = interlocking_json.interlocking_st60(
+                                                parent_serial_number = name_piece,
+                                                parent_part_number   = PART_NUMBER_GLOBAL
+                                            )
+
+                                            response_interlocking = requests.post(url_interlocking, json=payload_interlocking, timeout=30)
+
+                                            if response_interlocking.status_code != 200:
+                                                safe_insert(f"Interlocking HTTP {response_interlocking.status_code}", "red")
+                                                conn.send(f"FAILED".encode('UTF-8'))
+                                                green_label.configure(image=image_green)
+                                                red_label.configure(image=image_red_full)
+                                                break
+                                            
+                                            data_interlocking = response_interlocking.json()
+                                            
+                                            llamada_interlocking = data_interlocking.get("success", False)
+                                            
+                                            if llamada_interlocking == "false":
+                                                error_msg = data_interlocking.get("message", "Unknown error")
+                                                logging.error(f"Interlocking denied: {error_msg}")
+                                                safe_insert(f"❌ Interlocking API FAILED: {json.dumps(data_interlocking, indent=2)}", "red")
+                                                green_label.configure(image=image_green)
+                                                red_label.configure(image=image_red_full)
+                                                conn.send("FAILED".encode('UTF-8'))
+                                                break
+                                            
+                                            if isinstance(data_interlocking, list):
+                                                data_interlocking = data_interlocking[0] if len(data_interlocking) > 0 else {}
+                                            
+                                                logging.info(f"[INTERLOCKING RESPONSE]:\n{json.dumps(data_interlocking, indent=4, ensure_ascii=False)}")
+                                            
+                                            if not data_interlocking.get("success", False):
+                                                error_msg = data_interlocking.get("message", "Business rule validation error")
+                                                safe_insert(f"Interlocking Denied: {error_msg}", "red")
+                                                conn.send("FAILED".encode('UTF-8'))
+                                                green_label.configure(image=image_green)
+                                                red_label.configure(image=image_red_full)
+                                                break
+
+                                            #############################################################################################################################
+                                            ##################################################### LLAMADA A CONDUIT #####################################################
+                                            
+                                            if not url_conduit or url_conduit == "FAILED":
+                                                safe_insert("❌ Error obteniendo URL Conduit de DB.", "red")
+                                                conn.send("FAILED".encode('UTF-8'))
+                                                green_label.configure(image=image_green)
+                                                red_label.configure(image=image_red_full)
+                                                break
+            
+                                            payload_conduit = conduit_json.conduit_st60_v2(name_piece,1)
+
+                                            response_conduit = requests.post(url_conduit, json=payload_conduit, timeout=30)
+
+                                            if response_conduit.status_code != 200:
+                                                safe_insert(f"Interlocking HTTP {response_conduit.status_code}", "red")
+                                                conn.send(f"FAILED".encode('UTF-8'))
+                                                green_label.configure(image=image_green)
+                                                red_label.configure(image=image_red_full)
+                                                break
+                                            
+                                            data_conduit = response_conduit.json()
+
+                                            try:
+                                                measurement_key = data_conduit.get("transaction_responses")
+                                                measurement_key = measurement_key[0].get("command_responses")
+                                                measurement_key = measurement_key[0].get("results")
+                                                measurement_key = measurement_key[0].get("data")
+                                                measurement_key = measurement_key.get("measurement_key")
+
+                                            except Exception as e:
+                                                logging.error(f"Error extrayendo measurement_key de Conduit: {e}\n{json.dumps(data_conduit, indent=2)}")
+                                                safe_insert(f"❌ Error extrayendo measurement_key de Conduit: {e}\n{json.dumps(data_conduit, indent=2)}", "red")
+                                                conn.send("FAILED".encode('UTF-8'))
+                                                green_label.configure(image=image_green)
+                                                red_label.configure(image=image_red_full)
+                                                break
+
+                                            llamada_conduit = data_conduit.get("success", False)
+                                            
+                                            if llamada_conduit == "false":
+                                                error_msg = data_conduit.get("message", "Unknown error")
+                                                logging.error(f"CONDUIT denied: {error_msg}")
+                                                safe_insert(f"❌ CONDUIT API FAILED: {json.dumps(data_conduit, indent=2)}", "red")
+                                                green_label.configure(image=image_green)
+                                                red_label.configure(image=image_red_full)
+                                                conn.send("FAILED".encode('UTF-8'))
+                                                break
+                                            
+                                            if isinstance(data_conduit, list):
+                                                data_conduit = data_conduit[0] if len(data_conduit) > 0 else {}
+                                            
+                                                logging.info(f"[CONDUIT RESPONSE]:\n{json.dumps(data_conduit, indent=4, ensure_ascii=False)}")
+                                            
+                                            
+                                            #############################################################################################################################
+                                            conn.send(piece.encode('UTF-8'))
+    
+                                            # Almacenar la pieza en la base de datos
+                                            conexion.piece_store2(name_piece, PART_NUMBER_GLOBAL)
+                                            store_measurement_key = conexion.weight_store(measurement_key,"",name_piece)
+                                            
+                                            if store_measurement_key == "FAILED":
+                                                safe_insert(f"❌ Error guardando measurement_key en DB: {store_measurement_key}", "red")
+                                                conn.send("FAILED".encode('UTF-8'))
+                                                green_label.configure(image=image_green)
+                                                red_label.configure(image=image_red_full)
+                                                break
+                                                        
+                                            # Registrar en bitácora
+                                            conexionBitacora.event(
+                                            "SPP-001",
+                                            f"|Command received| {comando_completo} part: {name_piece} - Route check passed",
+                                            month,
+                                            day
+                                            )
+                                            conexionBitacora.event(
+                                            "CHKROUTE-001",
+                                            f"Route check passed for ISN: {name_piece}",
+                                            month,
+                                            day
+                                            )
+                                            conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
+
+                                            pantalla_final = (
+                                                f"Command received-> {comando_completo} part: {name_piece}\nCommand PASSED\n"
+                                                f"[INTERLOCKING REQUEST]:\n{json.dumps(payload_interlocking, indent=2)}\n\n"
+                                                f"[INTERLOCKING RESPONSE]:\n{json.dumps(data_interlocking, indent=2)}\n\n"
+                                                f"[CONDUIT REQUEST]:\n{json.dumps(payload_conduit, indent=2)}\n\n"
+                                                f"[CONDUIT RESPONSE]:\n{json.dumps(data_conduit, indent=2)}\n\n"
+                                                f"[MEASUREMENT KEY]: {measurement_key}\n\n"
+                                                f"[PN]: {PART_NUMBER_GLOBAL}  [SERIAL]: {name_piece}"
+                                            )
+                                            safe_insert(pantalla_final, "green")
+                                            logging.info(f"Command received-> {comando_completo} part: {name_piece} - Command PASSED")
+    
+                                            green_label.configure(image=image_green_full)
+                                            red_label.configure(image=image_red)
+                                            pieza = name_piece
+    
+                                            break
                                         else:
                                             entry_piece.configure(state=ctk.NORMAL)
                                             entry_piece.delete(0, ctk.END)
                                             safe_insert("❌ Formato de etiqueta inválido. Debe contener ':'", "red")
                                             conn.send("FAILED".encode('UTF-8'))
+                                            green_label.configure(image=image_green)
+                                            red_label.configure(image=image_red_full)
                                             error_detectado = True
                                             break
+                                        
 
-                                if error_detectado or not heatsink_scanned:
-                                    break
-
-                                entry_piece.configure(state=ctk.NORMAL)
-                                entry_piece.delete(0, ctk.END)
-                                piece_name.set("")
-
-                                safe_insert("\n🔍 SCAN 2/2: Scan Component Serial Number", "green")
-                                start_time_comp = time.time()
-                                comp_scanned = False
-
-                                while not comp_scanned:
-                                    scanned_component = entry_piece.get().strip()
-                                    time.sleep(0.05)
-                                    elapsed_comp = time.time() - start_time_comp
-
-                                    if len(scanned_component) == 0:
-                                        if elapsed_comp >= 240:
-                                            piece_name.set("")
-                                            safe_insert("Timeout waiting for Component scan.", "red")
-                                            conn.send("reset".encode('UTF-8'))
-                                            error_detectado = True
-                                            break
-                                        continue
-
-                                    if len(scanned_component) > 13:
-                                        entry_piece.configure(state="disabled")
-                                        COMPONENT = scanned_component
-                                        safe_insert(f"✅ Component Registered: {COMPONENT}", "green")
-                                        comp_scanned = True
-
-                                if error_detectado or not comp_scanned:
-                                    break
-
-                                url_interlocking = conexion.obtener_url(2)
-                                if not url_interlocking or url_interlocking == "FAILED":
-                                    safe_insert("❌ Error obteniendo URL Interlocking de DB.", "red")
-                                    conn.send("FAILED".encode('UTF-8'))
-                                    break
-
-                                payload_interlocking = interlocking_json.interlocking_st60(
-                                    parent_serial_number = SERIAL_PADRE_GLOBAL,
-                                    parent_part_number   = PART_NUMBER_GLOBAL
-                                )
-
-                                try:
-                                    response_interlocking, data_interlocking = post_api_debug(
-                                        nombre_api="INTERLOCKING",
-                                        url=url_interlocking,
-                                        payload=payload_interlocking,
-                                        timeout=30
-                                    )
-
-                                    if not isinstance(data_interlocking, dict):
-                                        data_interlocking = {}
-                                    
-                                    if response_interlocking.status_code != 200 or not data_interlocking.get("success", False):
-                                        safe_insert("❌ Interlocking rechazó el ciclo.", "red")
-                                        conn.send("FAILED".encode('UTF-8'))
-                                        break
-
-                                    interlocking_ok = True
-
-                                except Exception as err_int:
-                                    safe_insert(f"❌ HTTP Error Interlocking: {err_int}", "red")
-                                    conn.send("FAILED".encode('UTF-8'))
-                                    break
-
-                                # --- LLAMADA A CONDUIT ---
-                                url_conduit = conexion.obtener_url(4)
-                                if not url_conduit or url_conduit == "FAILED":
-                                    safe_insert("❌ Error obteniendo URL Conduit de DB.", "red")
-                                    conn.send("FAILED".encode('UTF-8'))
-                                    break
-
-                                payload_conduit_amk = {
-                                    "version":      "1.0",
-                                    "keep_alive":   False,
-                                    "refresh_unit": True,
-                                    "source": {
-                                        "workstation": {
-                                            "station": process_name,
-                                            "type":    "Process"
-                                        },
-                                        "client_id": client_id_db,
-                                        "employee":  operator_id,
-                                        "password":  ""
-                                    },
-                                    "transactions": [
-                                        {
-                                            "unit": {"unit_id": SERIAL_PADRE_GLOBAL},
-                                            "commands": [{"name": "AddMeasurementKey"}]
-                                        }
-                                    ]
-                                }
-
-                                try:
-                                    response_conduit, res_conduit_json = post_api_debug(
-                                        nombre_api="CONDUIT ADD MEASUREMENT KEY",
-                                        url=url_conduit,
-                                        payload=payload_conduit_amk,
-                                        timeout=30
-                                    )
-
-                                    if not isinstance(res_conduit_json, dict):
-                                        res_conduit_json = {}
-
-                                    status_node = res_conduit_json.get("status", {})
-                                    if response_conduit.status_code == 200 and status_node.get("code") == "OK":
-
+                                    elif len(name_piece) == 0 or len(name_piece) < 27:
+                                        # print("<30")
+                                        conn.settimeout(0.1)
                                         try:
-                                            MODO_PRUEBA = False 
-                                            if MODO_PRUEBA:
-                                                import random
-                                                MEASUREMENT_KEY_GLOBAL = str(random.randint(10000000, 99999999))
-                                                safe_insert(f"⚠️ [BYPASS ACTIVO] Usando key manual simulada: {MEASUREMENT_KEY_GLOBAL}", "orange")
-                                            else:
-                                                result_data = res_conduit_json["transaction_responses"][0]["command_responses"][0]["results"][0]
-                                                MEASUREMENT_KEY_GLOBAL = str(result_data["data"]["measurement_key"])
-                                                safe_insert(
-                                                    f"✅ Conduit AddMeasurementKey OK.\n"
-                                                    f"✅ measurement_key: {MEASUREMENT_KEY_GLOBAL}\n"
-                                                    f"✅ Serial activo: {SERIAL_PADRE_GLOBAL}\n\n" +
+                                            reset = conn.recv(1024)
+                                            conn.settimeout(None)
+                                            if reset:
+                                                # print(reset)
+                                                reset = reset.decode('utf-8')
+                                                entry_piece.configure(state="readonly", textvariable=piece_name)
+                                                piece_name.set("")
+                                                try:
+                                                    conn.send("RESET".encode('UTF-8'))
+                                                except Exception as e:
+                                                    safe_insert(f"Error enviando: {e}", "red")
+                                                    logging.error(f"Error enviando: {e}")
+                                                
+                                                safe_insert("Command received-> "+comando_completo+" RESET PROCESS-> Command: "+reset+"\n"+"Command RESET PASSED")
+                                                logging.error(f"Command received-> "+comando_completo+" RESET PROCESS-> Command: "+reset+"\n"+"Command RESET PASSED")
 
-                                                    bloque_json_ui(
-                                                        "INTERLOCKING",
-                                                        request=payload_interlocking,
-                                                        response=data_interlocking
-                                                    ) +
+                                                conexionBitacora.event("RP-002","|Command received| "+reset,month,day)
+                                                conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
 
-                                                    bloque_json_ui(
-                                                        "CONDUIT ADD MEASUREMENT KEY",
-                                                        request=payload_conduit_amk,
-                                                        response=res_conduit_json
-                                                    ),
-                                                    "green"
-                                                )
+                                                green_label.configure(image=image_green_full)
+                                                red_label.configure(image=image_red)
+                                                break
+                                        except socket.timeout:
+                                            # print("Timeout ocurred, no data received")
+                                            # contador = contador + 1
+                                            # print(contador)
+                                            pass
+                                        except ConnectionResetError:
+                                            # print("Connection was forcibly closed by the remote host")
+                                            safe_insert("Connection was forcibly closed by the remote host"+"\n"+"Connection error!"+"\n"+"Contact technical support!")
+                                            logging.error("Connection was forcibly closed by the remote host"+"\n"+"Connection error!"+"\n"+"Contact technical support!")
+                                            pass
 
-                                        except (KeyError, IndexError, TypeError) as e:
-                                            import random
-                                            MEASUREMENT_KEY_GLOBAL = str(random.randint(10000000, 99999999))
-                                            safe_insert(f"⚠️ [BYPASS EMERGENCIA] Estructura inválida ({e}). Key generado: {MEASUREMENT_KEY_GLOBAL}", "orange")
+                            except TypeError as e:
+                                print("Error: ", e)
+                                logging.error(f"Connection was closed"+"\n"+f"Error: {str(e)}"+"\n"+"Contact technical support!")
+                                safe_insert("Connection was closed"+"\n"+f"Error: {str(e)}"+"\n"+"Contact technical support!", "red")
+                                cadena = ""
+                        
+                        elif len(option) == 3 and option[-1] == '1/':
+                            entry_piece.configure(state=ctk.NORMAL, textvariable=piece_name)
+                            piece_name.set("")
+                            # safe_insert("You can scan the part.", "green")
 
-                                        conn.send(f"{SERIAL_PADRE_GLOBAL}, PASSED".encode('UTF-8'))
+                            green_label.configure(image=image_green_full)
+                            red_label.configure(image=image_red)
 
-                                        parte_existente = conexion.obtener_parte(SERIAL_PADRE_GLOBAL)
-                                        if not parte_existente or parte_existente == "FAILED":
-                                            conexion.piece_store(SERIAL_PADRE_GLOBAL)
+                            name_piece =option[1]
 
-                                        try:
-                                            if hasattr(conexion, "obtener_ultimo_id_screwing"):
-                                                START_SCREWING_ID_GLOBAL = conexion.obtener_ultimo_id_screwing(SERIAL_PADRE_GLOBAL)
-                                            else:
-                                                START_SCREWING_ID_GLOBAL = 0
-
-                                            print(
-                                                f"[CICLO ST60] Inicio de ciclo. "
-                                                f"Último ID Screwing previo: {START_SCREWING_ID_GLOBAL}"
-                                            )
-
-                                        except Exception as e:
-                                            START_SCREWING_ID_GLOBAL = 0
-                                            print(f"[CICLO ST60 WARNING] No se pudo obtener último ID Screwing: {e}")
-
-                                        try:
-                                            parte_actual = conexion.obtener_parte(SERIAL_PADRE_GLOBAL)
-                                            station_actual = conexion.stations()
-
-                                            if parte_actual and parte_actual != "FAILED" and station_actual:
-                                                part_id = parte_actual[0]
-                                                station_id = station_actual[0]
-
-                                                if hasattr(conexion, "duration_start_st60"):
-                                                    conexion.duration_start_st60(station_id, part_id)
-
-                                                print(f"[DURATION] Inicio registrado station_id={station_id} part_id={part_id}")
-
-                                        except Exception as e:
-                                            print(f"[DURATION WARNING] No se pudo iniciar duration: {e}")
-
-                                        conexionBitacora.event("SPP-001", f"Parent: {SERIAL_PADRE_GLOBAL}", month, day)
-                                        piece_name.set(SERIAL_PADRE_GLOBAL)
-                                        entry_piece.configure(state="readonly")
-                                        green_label.configure(image=image_green_full)
-                                        break
-
-                                    else:
-                                        safe_insert("❌ Conduit AddMeasurementKey Error.", "red")
-                                        conn.send("FAILED, CONDUIT ERROR".encode('UTF-8'))
-                                        break
-
-                                except Exception as err_cd:
-                                    safe_insert(f"❌ Exception Conduit: {err_cd}", "red")
-                                    conn.send("FAILED, CONDUIT OFFLINE".encode('UTF-8'))
-                                    break
-
-                            except Exception as e:
-                                entry_piece.configure(state=ctk.NORMAL)
-                                safe_insert(f"❌ Exception Caught: {str(e)}", "red")
-                                break
-
-                        elif len(option) >= 3 and option[-1] == '1/':
-                            name_piece = str(option[1]).strip()
-
-                            if len(option) >= 4:
-                                scanned_component = str(option[2]).strip()
-                            else:
-                                scanned_component = ""
-
-                            safe_insert(f"Validando via PLC...", "orange")
-
-                            try:
+                            if len(name_piece) > 27:
+                            
                                 if ":" in name_piece:
                                     partes_etiqueta = name_piece.split(":")
                                     
@@ -1275,149 +927,206 @@ def worker(conn, addr):
                                     
                                     SERIAL_PADRE_GLOBAL = str(name_piece).strip()
                                     PART_NUMBER         = PART_NUMBER_GLOBAL
-                                    COMPONENT           = scanned_component if scanned_component else ""
                                     
-                                    safe_insert(f"✅ Extracción PLC OK -> PN: {PART_NUMBER_GLOBAL}  Serial: {SERIAL_PADRE_GLOBAL}", "green")
-                                else:
-                                    safe_insert("❌ Error: La cadena enviada por el PLC no contiene ':' para separar PN y Serial", "red")
-                                    conn.send("FAILED".encode('UTF-8'))
-                                    break
+                                    safe_insert(f"✅ Extracción Manual OK -> PN: {PART_NUMBER_GLOBAL}  Serial: {SERIAL_PADRE_GLOBAL}", "green")
 
-                                # --- LLAMADA A INTERLOCKING ---
-                                url_interlocking     = conexion.obtener_url(2)
-                                payload_interlocking = interlocking_json.interlocking_st60(
-                                    parent_serial_number = SERIAL_PADRE_GLOBAL,
-                                    parent_part_number   = PART_NUMBER_GLOBAL
-                                )
-
-                                response_interlocking, data_interlocking = post_api_debug(
-                                    nombre_api="INTERLOCKING",
-                                    url=url_interlocking,
-                                    payload=payload_interlocking,
-                                    timeout=30
-                                )
-
-                                if not isinstance(data_interlocking, dict):
-                                    data_interlocking = {}
-
-                                if response_interlocking.status_code != 200 or not data_interlocking.get("success", False):
-                                    conn.send("FAILED".encode('UTF-8'))
-                                    break
-
-                                # --- LLAMADA A CONDUIT ---
-                                url_conduit          = conexion.obtener_url(4)
-                                payload_conduit_amk  = {
-                                    "version":      "1.0", "keep_alive": False, "refresh_unit": True,
-                                    "source": {
-                                        "workstation": {"station": process_name, "type": "Process"},
-                                        "client_id":   client_id_db,
-                                        "employee":    operator_id,
-                                        "password":    ""
-                                    },
-                                    "transactions": [
-                                        {
-                                            "unit":      {"unit_id": SERIAL_PADRE_GLOBAL},
-                                            "commands": [{"name": "AddMeasurementKey"}]
-                                        }
-                                    ]
-                                }
-
-                                response_conduit, res_conduit_json = post_api_debug(
-                                    nombre_api="CONDUIT ADD MEASUREMENT KEY",
-                                    url=url_conduit,
-                                    payload=payload_conduit_amk,
-                                    timeout=30
-                                )
-
-                                if not isinstance(res_conduit_json, dict):
-                                    res_conduit_json = {}
-
-                                if response_conduit.status_code == 200 and res_conduit_json.get("status", {}).get("code") == "OK":
-
-                                    try:
-                                        MODO_PRUEBA = False 
-                                        if MODO_PRUEBA:
-                                            import random
-                                            MEASUREMENT_KEY_GLOBAL = str(random.randint(10000000, 99999999))
-                                            safe_insert(f"⚠️ [BYPASS ACTIVO] Usando clave de medición simulada: {MEASUREMENT_KEY_GLOBAL}", "orange")
-                                        else:
-                                            result_data = res_conduit_json["transaction_responses"][0]["command_responses"][0]["results"][0]
-                                            MEASUREMENT_KEY_GLOBAL = str(result_data["data"]["measurement_key"])
-                                            safe_insert(
-                                                f"✅ Conduit AddMeasurementKey OK.\n"
-                                                f"✅ measurement_key: {MEASUREMENT_KEY_GLOBAL}\n"
-                                                f"✅ Serial activo: {SERIAL_PADRE_GLOBAL}\n\n" +
-
-                                                bloque_json_ui(
-                                                    "INTERLOCKING",
-                                                    request=payload_interlocking,
-                                                    response=data_interlocking
-                                                ) +
-
-                                                bloque_json_ui(
-                                                    "CONDUIT ADD MEASUREMENT KEY",
-                                                    request=payload_conduit_amk,
-                                                    response=res_conduit_json
-                                                ),
-                                                "green"
-                                            )
-
-                                    except (KeyError, IndexError, TypeError) as e:
-                                        import random
-                                        MEASUREMENT_KEY_GLOBAL = str(random.randint(10000000, 99999999))
-                                        safe_insert(f"⚠️ [BYPASS EMERGENCIA] Estructura inválida ({e}). Key generado: {MEASUREMENT_KEY_GLOBAL}", "orange")
-
+                                    piece = name_piece + ", PASSED"
                                     entry_piece.configure(state="readonly", textvariable=piece_name)
-                                    piece_name.set(SERIAL_PADRE_GLOBAL)
-                                    conn.send(f"{SERIAL_PADRE_GLOBAL}, PASSED".encode('UTF-8'))
+                                    piece_name.set(name_piece)
 
-                                    parte_existente = conexion.obtener_parte(SERIAL_PADRE_GLOBAL)
-                                    if not parte_existente or parte_existente == "FAILED":
-                                        conexion.piece_store(SERIAL_PADRE_GLOBAL)
+                                    ##################################################### Json para enviar al endpoint Interlocking ##############################################################                                           
+                                    if not url_interlocking or url_interlocking == "FAILED":
+                                        safe_insert("❌ Error obteniendo URL Interlocking de DB.", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        green_label.configure(image=image_green)
+                                        red_label.configure(image=image_red_full)
+                                        break
+    
+                                    payload_interlocking = interlocking_json.interlocking_st60(
+                                        parent_serial_number = name_piece,
+                                        parent_part_number   = PART_NUMBER_GLOBAL
+                                    )
+
+                                    response_interlocking = requests.post(url_interlocking, json=payload_interlocking, timeout=30)
+
+                                    if response_interlocking.status_code != 200:
+                                        safe_insert(f"Interlocking HTTP {response_interlocking.status_code}", "red")
+                                        conn.send(f"FAILED".encode('UTF-8'))
+                                        green_label.configure(image=image_green)
+                                        red_label.configure(image=image_red_full)
+                                        break
+                                    
+                                    data_interlocking = response_interlocking.json()
+                                    
+                                    llamada_interlocking = data_interlocking.get("success", False)
+                                    
+                                    if llamada_interlocking == "false":
+                                        error_msg = data_interlocking.get("message", "Unknown error")
+                                        logging.error(f"Interlocking denied: {error_msg}")
+                                        safe_insert(f"❌ Interlocking API FAILED: {json.dumps(data_interlocking, indent=2)}", "red")
+                                        green_label.configure(image=image_green)
+                                        red_label.configure(image=image_red_full)
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        break
+                                    
+                                    if isinstance(data_interlocking, list):
+                                        data_interlocking = data_interlocking[0] if len(data_interlocking) > 0 else {}
+                                    
+                                        logging.info(f"[INTERLOCKING RESPONSE]:\n{json.dumps(data_interlocking, indent=4, ensure_ascii=False)}")
+                                    
+                                    if not data_interlocking.get("success", False):
+                                        error_msg = data_interlocking.get("message", "Business rule validation error")
+                                        safe_insert(f"Interlocking Denied: {error_msg}", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        green_label.configure(image=image_green)
+                                        red_label.configure(image=image_red_full)
+                                        break
+
+                                    #############################################################################################################################
+                                    ##################################################### LLAMADA A CONDUIT #####################################################
+                                    
+                                    if not url_conduit or url_conduit == "FAILED":
+                                        safe_insert("❌ Error obteniendo URL Conduit de DB.", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        green_label.configure(image=image_green)
+                                        red_label.configure(image=image_red_full)
+                                        break
+    
+                                    payload_conduit = conduit_json.conduit_st60_v2(name_piece,1)
+
+                                    response_conduit = requests.post(url_conduit, json=payload_conduit, timeout=30)
+
+                                    if response_conduit.status_code != 200:
+                                        safe_insert(f"Interlocking HTTP {response_conduit.status_code}", "red")
+                                        conn.send(f"FAILED".encode('UTF-8'))
+                                        green_label.configure(image=image_green)
+                                        red_label.configure(image=image_red_full)
+                                        break
+                                    
+                                    data_conduit = response_conduit.json()
 
                                     try:
-                                        if hasattr(conexion, "obtener_ultimo_id_screwing"):
-                                            START_SCREWING_ID_GLOBAL = conexion.obtener_ultimo_id_screwing(SERIAL_PADRE_GLOBAL)
-                                        else:
-                                            START_SCREWING_ID_GLOBAL = 0
-
-                                        print(
-                                            f"[CICLO ST60] Inicio de ciclo. "
-                                            f"Último ID Screwing previo: {START_SCREWING_ID_GLOBAL}"
-                                        )
+                                        measurement_key = data_conduit.get("transaction_responses")
+                                        measurement_key = measurement_key[0].get("command_responses")
+                                        measurement_key = measurement_key[0].get("results")
+                                        measurement_key = measurement_key[0].get("data")
+                                        measurement_key = measurement_key.get("measurement_key")
 
                                     except Exception as e:
-                                        START_SCREWING_ID_GLOBAL = 0
-                                        print(f"[CICLO ST60 WARNING] No se pudo obtener último ID Screwing: {e}")
+                                        logging.error(f"Error extrayendo measurement_key de Conduit: {e}\n{json.dumps(data_conduit, indent=2)}")
+                                        safe_insert(f"❌ Error extrayendo measurement_key de Conduit: {e}\n{json.dumps(data_conduit, indent=2)}", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        green_label.configure(image=image_green)
+                                        red_label.configure(image=image_red_full)
+                                        break
 
-                                    try:
-                                        parte_actual = conexion.obtener_parte(SERIAL_PADRE_GLOBAL)
-                                        station_actual = conexion.stations()
+                                    llamada_conduit = data_conduit.get("success", False)
+                                    
+                                    if llamada_conduit == "false":
+                                        error_msg = data_conduit.get("message", "Unknown error")
+                                        logging.error(f"CONDUIT denied: {error_msg}")
+                                        safe_insert(f"❌ CONDUIT API FAILED: {json.dumps(data_conduit, indent=2)}", "red")
+                                        green_label.configure(image=image_green)
+                                        red_label.configure(image=image_red_full)
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        break
+                                    
+                                    if isinstance(data_conduit, list):
+                                        data_conduit = data_conduit[0] if len(data_conduit) > 0 else {}
+                                    
+                                        logging.info(f"[CONDUIT RESPONSE]:\n{json.dumps(data_conduit, indent=4, ensure_ascii=False)}")
+                                    
+                                    
+                                    #############################################################################################################################
+                                    conn.send(piece.encode('UTF-8'))
 
-                                        if parte_actual and parte_actual != "FAILED" and station_actual:
-                                            part_id = parte_actual[0]
-                                            station_id = station_actual[0]
+                                    # Almacenar la pieza en la base de datos
+                                    conexion.piece_store2(name_piece, PART_NUMBER_GLOBAL)
+                                    store_measurement_key = conexion.weight_store(measurement_key,"",name_piece)
+                                    
+                                    if store_measurement_key == "FAILED":
+                                        safe_insert(f"❌ Error guardando measurement_key en DB: {store_measurement_key}", "red")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        green_label.configure(image=image_green)
+                                        red_label.configure(image=image_red_full)
+                                        break
+                                                
+                                    # Registrar en bitácora
+                                    conexionBitacora.event(
+                                    "SPP-001",
+                                    f"|Command received| {comando_completo} part: {name_piece} - Route check passed",
+                                    month,
+                                    day
+                                    )
+                                    conexionBitacora.event(
+                                    "CHKROUTE-001",
+                                    f"Route check passed for ISN: {name_piece}",
+                                    month,
+                                    day
+                                    )
+                                    conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
 
-                                            if hasattr(conexion, "duration_start_st60"):
-                                                conexion.duration_start_st60(station_id, part_id)
+                                    pantalla_final = (
+                                        f"Command received-> {comando_completo} part: {name_piece}\nCommand PASSED\n"
+                                        f"[INTERLOCKING REQUEST]:\n{json.dumps(payload_interlocking, indent=2)}\n\n"
+                                        f"[INTERLOCKING RESPONSE]:\n{json.dumps(data_interlocking, indent=2)}\n\n"
+                                        f"[CONDUIT REQUEST]:\n{json.dumps(payload_conduit, indent=2)}\n\n"
+                                        f"[CONDUIT RESPONSE]:\n{json.dumps(data_conduit, indent=2)}\n\n"
+                                        f"[MEASUREMENT KEY]: {measurement_key}\n\n"
+                                        f"[PN]: {PART_NUMBER_GLOBAL}  [SERIAL]: {name_piece}"
+                                    )
+                                    safe_insert(pantalla_final, "green")
+                                    logging.info(f"Command received-> {comando_completo} part: {name_piece} - Command PASSED")
 
-                                            print(f"[DURATION] Inicio registrado station_id={station_id} part_id={part_id}")
+                                    green_label.configure(image=image_green_full)
+                                    red_label.configure(image=image_red)
+                                    pieza = name_piece
 
-                                    except Exception as e:
-                                        print(f"[DURATION WARNING] No se pudo iniciar duration: {e}")
-
-                                    conexionBitacora.event("SPP-001", f"Parent: {SERIAL_PADRE_GLOBAL}", month, day)
                                     break
                                 else:
+                                    entry_piece.configure(state=ctk.NORMAL)
+                                    entry_piece.delete(0, ctk.END)
+                                    safe_insert("❌ Formato de etiqueta inválido. Debe contener ':'", "red")
                                     conn.send("FAILED".encode('UTF-8'))
+                                    green_label.configure(image=image_green)
+                                    red_label.configure(image=image_red_full)
+                                    error_detectado = True
                                     break
+                                
+                            else:
+                                conn.settimeout(None)
+                                entry_piece.configure(state="readonly", textvariable=piece_name)
+                                piece_name.set("")
+                                            
+                                safe_insert("Command received-> "+cadena+" part: "+name_piece+"\n"+"Command FAILED")
+                                logging.warning(f"Command received-> "+cadena+" part: "+name_piece+"\n"+"Command FAILED")
 
-                            except Exception as e:
-                                safe_insert(f"❌ Exception: {str(e)}", "red")
-                                logging.error(f"Error en case start PLC: {str(e)}")
+                                try:
+                                    conn.send("FAILED".encode('UTF-8'))
+                                    conn.send("verify data".encode('UTF-8'))
+                                except Exception as e:
+                                    safe_insert(f"Error enviando: {e}", "red")
+                                    logging.error(f"Error enviando: {e}")
+                                            
+                                conexionBitacora.event("SPP-002","|Command received| "+cadena+" part: "+name_piece,month,day)
+                                conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+
+                                green_label.configure(image=image_green)
+                                red_label.configure(image=image_red_full)
+                                                
                                 break
-                        cadena = ""
+                        else:
+                            safe_insert("Command received-> "+cadena+"\n"+"Command FAILED", "red")
+                            logging.error(f"Command received-> "+cadena+"\n"+"Command FAILED")
 
+                            conexionBitacora.event("SPP-002","|Command received| "+cadena,month,day)
+                            conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+
+                            green_label.configure(image=image_green)
+                            red_label.configure(image=image_red_full)
+
+                            cadena = ""
+                                        
                     case "verify":
                         pieza_padre = piece_name.get()
                         
@@ -1456,1055 +1165,553 @@ def worker(conn, addr):
                         cadena = ""
 
                     case "end_process":
-                        print("\n[END PROCESS] Iniciando evaluación...")
-
-                        socket_status_raw = "PASSED"
-                        tornillo_afectado = ""
-                        intento_actual = 1
-                        serial_plc = SERIAL_PADRE_GLOBAL
-
-                        cadena_original = ""
+                        estado_general = ""
                         for item in option:
-                            cadena_original += str(item) + ","
+                            cadena += str(item) + ","
 
-                        try:
-                            if len(option) == 0 or option[-1] != "1/":
-                                safe_insert(
-                                    "Command received-> " + cadena_original + "\n" +
-                                    "Command FAILED - formato end_process inválido\n",
-                                    "red"
-                                )
+                        urls = conexion.obtener_url_api()
+                        url_conduit = urls[3][0]
+                        url_traceability = urls[2][0]
 
-                                try:
-                                    conn.send("FAILED".encode("UTF-8"))
-                                except Exception as e:
-                                    safe_insert(f"Error enviando: {e}", "red")
+                        pantalla_final = ""
 
-                                conexionBitacora.event("END-F001", "END_PROCESS,FAILED,FORMATO_INVALIDO", month, day)
-                                green_label.configure(image=image_green)
-                                red_label.configure(image=image_red_full)
-                                break
+                        name_piece = option[-2]
+                        if len(option) == 6 and option[-1] == '1/':
+                            duration = "PASSED"#conexion.duration(cadena,option[4])
 
-                            socket_status_raw = str(option[1]).strip().upper() if len(option) > 1 else "PASSED"
-                            tornillo_afectado = str(option[2]).strip().upper() if len(option) > 2 else ""
-                            
-                            if tornillo_afectado.isdigit():
-                                tornillo_afectado = f"TORNILLO_{tornillo_afectado}"
-
-                            raw_intento = str(option[3]).strip().lower() if len(option) > 3 else "1"
-                            raw_intento = raw_intento.replace("intento", "").strip()
-
-                            try:
-                                intento_actual = int(raw_intento)
-                            except ValueError:
-                                intento_actual = 1
-
-                            serial_plc = str(option[4]).strip() if len(option) > 4 else SERIAL_PADRE_GLOBAL
-
-                            # Normalizar status
-                            if socket_status_raw in ["FAILED", "FAIL", "NOK"]:
-                                socket_status_raw = "FAILED"
-                            elif socket_status_raw in ["PASSED", "PASS", "OK"]:
-                                socket_status_raw = "PASSED"
-                            else:
-                                socket_status_raw = "FAILED"
-
-                            print(
-                                f"[DEBUG] Status: {socket_status_raw}  "
-                                f"Tornillo: {tornillo_afectado}  "
-                                f"Intento: {intento_actual}  "
-                                f"Serial PLC: {serial_plc}"
-                            )
-
-                            if not SERIAL_PADRE_GLOBAL:
-                                safe_insert(
-                                    "Command received-> " + cadena_original + "\n" +
-                                    "Command FAILED - No hay serial activo. Ejecuta START primero.\n",
-                                    "red"
-                                )
+                            if duration == "PASSED":
+                                # entry_piece.configure(state="readonly", textvariable=piece_name)
+                                # piece_name.set("")
+                                configurador_data = conexion.get_configurator_data()
+                                configurador_data = configurador_data[1]
 
                                 try:
-                                    conn.send("FAILED".encode("UTF-8"))
-                                except Exception as e:
-                                    safe_insert(f"Error enviando: {e}", "red")
+                                    logging.info(f"URL Traceability: {url_traceability}")
 
-                                conexionBitacora.event("END-F002", "END_PROCESS,FAILED,SIN_SERIAL_ACTIVO", month, day)
-                                green_label.configure(image=image_green)
-                                red_label.configure(image=image_red_full)
-                                break
+                                    payload_traceability = traceability_json.traceability_station_60(option[4],"")
+                                    defect_code = payload_traceability[1]
+                                    payload_traceability = payload_traceability[0]
 
-                            if serial_plc and serial_plc != SERIAL_PADRE_GLOBAL:
-                                print(
-                                    f"[WARNING] Serial PLC diferente al global. "
-                                    f"PLC={serial_plc} GLOBAL={SERIAL_PADRE_GLOBAL}"
-                                )
+                                    logging.info(f"[TRACEABILITY JSON]:\n{json.dumps(payload_traceability, indent=4, ensure_ascii=False)}")
 
-                            # Obtener URLs
-                            url_traceability = conexion.obtener_url(3)
-                            url_conduit = conexion.obtener_url(4)
+                                    estado_general = payload_traceability.get("status")
 
-                            if not url_traceability:
-                                safe_insert("[END PROCESS] No se encontró URL de Traceability\n", "red")
-                                conn.send("FAILED".encode("UTF-8"))
-                                break
-
-                            if not url_conduit:
-                                safe_insert("[END PROCESS] No se encontró URL de Conduit\n", "red")
-                                conn.send("FAILED".encode("UTF-8"))
-                                break
-
-                            # Máximo de intentos ST60
-                            # Primero intenta tomarlo desde DB.
-                            # Si falla o no existe tabla attempts, usa 3 como respaldo.
-                            try:
-                                max_intentos = int(conexion.obtener_max_attempts())
-
-                                if max_intentos <= 0:
-                                    max_intentos = 3
-
-                            except Exception as e:
-                                print(f"[WARNING] No se pudo obtener max_intentos desde DB. Usando 3. Error: {e}")
-                                max_intentos = 3
-
-                            if intento_actual < 1:
-                                intento_actual = 1
-
-                            print(
-                                f"[REINTENTO ST60] Tornillo={tornillo_afectado} "
-                                f"Intento PLC={intento_actual}/{max_intentos}"
-                            )
-                            atributos_map = {}
-
-                            try:
-                                atributos = conexion.select_attributes_st50_80()
-
-                                for attr in atributos:
-                                    try:
-                                        # select_attributes_st50_80() regresa:
-                                        # attr[0] = attribute_id
-                                        # attr[1] = name
-                                        # attr[2] = unit
-                                        # attr[3] = lower_limit
-                                        # attr[4] = upper_limit
-                                        # attr[5] = defect_code
-                                        # attr[6] = defect_code_high
-
-                                        nombre_attr = str(attr[1]).strip()
-                                        key_name = nombre_attr.lower()
-
-                                        config_attr = {
-                                            "name": nombre_attr,
-                                            "unit": str(attr[2]).strip() if len(attr) > 2 and attr[2] is not None else "",
-                                            "lower_limit": float(attr[3]) if len(attr) > 3 and attr[3] is not None else None,
-                                            "upper_limit": float(attr[4]) if len(attr) > 4 and attr[4] is not None else None,
-                                            "defect_code_low": str(attr[5]).strip() if len(attr) > 5 and attr[5] is not None else "",
-                                            "defect_code_high": str(attr[6]).strip() if len(attr) > 6 and attr[6] is not None else "",
-                                        }
-
-                                        aliases = [
-                                            key_name,
-                                            key_name.replace("_", " "),
-                                            key_name.replace(" ", "_"),
-                                            key_name.split(" ")[0],
-                                            key_name.split("_")[0],
-                                        ]
-
-                                        for alias in aliases:
-                                            if alias:
-                                                atributos_map[alias] = config_attr
-
-                                    except Exception as e:
-                                        print(f"[WARNING] Error cargando atributo {attr}: {e}")
-
-                                print("\n========== ATRIBUTOS MAP ==========")
-                                for k, v in atributos_map.items():
-                                    print(
-                                        f"{k} -> "
-                                        f"LOW={v.get('defect_code_low')}  "
-                                        f"HIGH={v.get('defect_code_high')}"
-                                    )
-                                print("==================================\n")
-
-                            except Exception as e:
-                                print(f"[WARNING] No se pudieron cargar atributos: {e}")
-
-                            # Consultar estado actual de screwing desde BD
-                            # Solo toma registros posteriores al START actual.
-                            # Si hay reintentos del mismo tornillo, toma el último registro.
-                            all_screwing_attempts = conexion.screwing_current_state(
-                                SERIAL_PADRE_GLOBAL,
-                                START_SCREWING_ID_GLOBAL
-                            )
-
-                            print(f"[DEBUG] screwing_current_state: {len(all_screwing_attempts)} registros encontrados.")
-
-                            print("\n========== ESTADO ACTUAL SCREWING ==========")
-                            for row in all_screwing_attempts:
-                                try:
-                                    print(
-                                        f"ID={row[0]}  VALUE={row[1]}  LOW={row[2]}  HIGH={row[3]}  "
-                                        f"RESULT={row[6]}  DESCRIPTION={row[10]}"
-                                    )
-                                except Exception:
-                                    print(row)
-                            print("============================================\n")
-
-                            if not all_screwing_attempts:
-                                safe_insert(
-                                    "Command received-> " + cadena_original + "\n" +
-                                    "Command FAILED - No hay mediciones screwing guardadas\n",
-                                    "red"
-                                )
-
-                                try:
-                                    conn.send("FAILED".encode("UTF-8"))
-                                except Exception as e:
-                                    safe_insert(f"Error enviando: {e}", "red")
-
-                                conexionBitacora.event("END-F003", "END_PROCESS,FAILED,SIN_MEDICIONES", month, day)
-                                green_label.configure(image=image_green)
-                                red_label.configure(image=image_red_full)
-                                break
-
-                            # Fecha UTC para Traceability
-                            now_utc = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-
-                            # Crear JSON Traceability
-                            payload_traceability = traceability_json.traceability_st60(
-                                serial_padre=SERIAL_PADRE_GLOBAL,
-                                part_number_padre=PART_NUMBER_GLOBAL,
-                                measurement_key=MEASUREMENT_KEY_GLOBAL,
-                                all_screwing_attempts=all_screwing_attempts,
-                                atributos_map=atributos_map,
-                                now_utc=now_utc,
-                                machine_id=machine_id,
-                                operator_id=operator_id,
-                                process_name=process_name,
-                                password=""
-                            )
-
-                            # Si el PLC manda FAILED, el JSON no puede salir como PASS.
-                            try:
-                                hay_step_fail = traceability_tiene_step_fail(payload_traceability)
-
-                                if socket_status_raw == "FAILED":
-                                    payload_traceability["status"] = "FAIL"
-
-                                    if not hay_step_fail:
-                                        safe_insert(
-                                            "Command received-> " + cadena_original + "\n" +
-                                            "TRACEABILITY BLOQUEADO: end_process viene FAILED, "
-                                            "pero no se encontró ninguna medición FAIL con datos.\n" +
-                                            "Revisa que el commit del reintento se haya recibido y guardado antes del end_process.\n\n" +
-                                            bloque_json_ui(
-                                                "TRACEABILITY NO ENVIADO",
-                                                request=payload_traceability,
-                                                response=None
-                                            ),
-                                            "red"
-                                        )
-
-                                        print("[ERROR] Payload Traceability sin step FAIL:")
-                                        print(json_pretty(payload_traceability))
-
-                                        try:
-                                            conn.send("FAILED".encode("UTF-8"))
-                                        except Exception as e:
-                                            safe_insert(f"Error enviando: {e}", "red")
-
-                                        green_label.configure(image=image_green)
-                                        red_label.configure(image=image_red_full)
-                                        break
-
-                                elif socket_status_raw == "PASSED":
-                                    if hay_step_fail:
-                                        payload_traceability["status"] = "FAIL"
-                                    else:
-                                        payload_traceability["status"] = "PASS"
-
-                            except Exception as e:
-                                safe_insert(f"Error validando payload Traceability: {e}", "red")
-                                try:
-                                    conn.send("FAILED".encode("UTF-8"))
-                                except Exception as send_error:
-                                    safe_insert(f"Error enviando: {send_error}", "red")
-                                green_label.configure(image=image_green)
-                                red_label.configure(image=image_red_full)
-                                break
-
-                            if socket_status_raw == "FAILED" and intento_actual < max_intentos:
-                                print(
-                                    f"[FLUJO ST60] Reintento de tornillo. "
-                                    f"Se enviará Traceability + RecordDefect + RepairAllDefects. "
-                                    f"NO se enviará Conduit End. Intento {intento_actual}/{max_intentos}"
-                                )
-                            elif socket_status_raw == "FAILED" and intento_actual >= max_intentos:
-                                print(
-                                    f"[FLUJO ST60] Último intento fallido. "
-                                    f"Se enviará Traceability + RecordDefect + Conduit End. "
-                                    f"Intento {intento_actual}/{max_intentos}"
-                                )
-                            else:
-                                print("[FLUJO ST60] Pieza PASSED. Se enviará Traceability + Conduit End.")
-
-                            response_traceability, response_traceability_json = post_api_debug(
-                                nombre_api="TRACEABILITY",
-                                url=url_traceability,
-                                payload=payload_traceability,
-                                timeout=30
-                            )
-
-                            try:
-                                logger.info(json.dumps(response_traceability.json(), indent=2))
-                            except Exception:
-                                logger.info(response_traceability.text)
-
-                            if response_traceability.status_code not in [200, 201]:
-                                safe_insert(
-                                    "Command received-> " + cadena_original + "\n" +
-                                    "Traceability FAILED\n\n" +
-                                    bloque_json_ui(
-                                        "TRACEABILITY",
-                                        request=payload_traceability,
-                                        response=response_traceability_json
-                                    ),
-                                    "red"
-                                )
-
-                                try:
-                                    conn.send("FAILED".encode("UTF-8"))
-                                except Exception as e:
-                                    safe_insert(f"Error enviando: {e}", "red")
-
-                                conexionBitacora.event("END-F004", "TRACEABILITY,FAILED", month, day)
-                                green_label.configure(image=image_green)
-                                red_label.configure(image=image_red_full)
-                                break
-
-                            def calcular_defect_code():
-                                """
-                                Toma el defect_code del payload de Traceability.
-                                Si el step falló pero viene sin defect_code, intenta recuperarlo
-                                desde atributos_map usando alias de Torque, Angles, Rundown Angle y Position Y.
-                                """
-
-                                try:
-                                    steps_dict = payload_traceability.get("test_steps", {})
-                                    failed_steps = []
-
-                                    for _, lista in steps_dict.items():
-                                        if not isinstance(lista, list):
-                                            continue
-
-                                        for step in lista:
-                                            status_step = str(step.get("status", "")).strip().upper()
-
-                                            fuera_de_limite = False
-                                            try:
-                                                valor_step = float(step.get("value", 0))
-                                                low_step = float(step.get("lowLimit", 0))
-                                                high_step = float(step.get("highLimit", 0))
-                                                fuera_de_limite = valor_step < low_step or valor_step > high_step
-                                            except Exception:
-                                                valor_step = 0
-                                                low_step = 0
-                                                high_step = 0
-                                                fuera_de_limite = False
-
-                                            if status_step not in ["FAIL", "FAILED", "NOK"] and not fuera_de_limite:
-                                                continue
-
-                                            name_step = str(step.get("name", "")).strip()
-                                            desc_step = str(step.get("description", "")).strip()
-                                            defect_code = str(step.get("defect_code", "")).strip()
-
-                                            if not defect_code:
-                                                candidatos = []
-
-                                                for texto_step in [name_step, desc_step]:
-                                                    texto_norm = str(texto_step or "").strip().lower()
-                                                    texto_norm = texto_norm.replace("_", " ").replace("-", " ")
-                                                    texto_norm = " ".join(texto_norm.split())
-
-                                                    if texto_norm:
-                                                        candidatos.append(texto_norm)
-                                                        candidatos.append(texto_norm.replace(" ", "_"))
-                                                        candidatos.append(texto_norm.replace(" ", ""))
-
-                                                        if " " in texto_norm:
-                                                            candidatos.append(texto_norm.split(" ")[0])
-
-                                                candidatos_extra = []
-
-                                                for candidato in candidatos:
-                                                    if candidato in ["t", "torque"]:
-                                                        candidatos_extra.extend(["torque"])
-
-                                                    elif candidato in ["a", "angle", "angles", "angulo", "ángulo"]:
-                                                        candidatos_extra.extend(["angles", "angle"])
-
-                                                    elif candidato in [
-                                                        "px",
-                                                        "rda",
-                                                        "ra",
-                                                        "rundown",
-                                                        "rundown angle",
-                                                        "rundownangle",
-                                                        "rundown_angle",
-                                                        "position x",
-                                                        "positionx",
-                                                        "position_x"
-                                                    ]:
-                                                        candidatos_extra.extend([
-                                                            "rundown angle",
-                                                            "rundown_angle",
-                                                            "rundownangle",
-                                                            "px",
-                                                            "rda",
-                                                            "position x",
-                                                            "position_x",
-                                                            "positionx"
-                                                        ])
-
-                                                    elif candidato in ["py", "position y", "position_y", "positiony"]:
-                                                        candidatos_extra.extend(["position y", "position_y", "positiony"])
-
-                                                candidatos.extend(candidatos_extra)
-
-                                                config_attr = {}
-
-                                                for candidato in candidatos:
-                                                    if candidato in atributos_map:
-                                                        config_attr = atributos_map[candidato]
-                                                        break
-
-                                                if config_attr:
-                                                    defect_low = str(config_attr.get("defect_code_low", "")).strip()
-                                                    defect_high = str(config_attr.get("defect_code_high", "")).strip()
-
-                                                    if valor_step < low_step:
-                                                        defect_code = defect_low
-                                                    elif valor_step > high_step:
-                                                        defect_code = defect_high
-                                                    else:
-                                                        defect_code = defect_low if defect_low else defect_high
-
-                                                    print(
-                                                        f"[DEBUG] Defect code recuperado: "
-                                                        f"name={name_step}, value={valor_step}, "
-                                                        f"low={low_step}, high={high_step}, defect={defect_code}"
-                                                    )
-
-                                            failed_steps.append({
-                                                "name": name_step.upper(),
-                                                "description": desc_step.upper(),
-                                                "defect_code": defect_code,
-                                                "fuera_de_limite": fuera_de_limite
-                                            })
-
-                                    if tornillo_afectado:
-                                        for step in failed_steps:
-                                            if not step["defect_code"]:
-                                                continue
-
-                                            if tornillo_afectado in step["name"] or tornillo_afectado in step["description"]:
-                                                print(f"[DEBUG] Defect code tomado por tornillo: {step['defect_code']}")
-                                                return step["defect_code"]
-
-                                    failed_con_codigo = [
-                                        step for step in failed_steps
-                                        if str(step.get("defect_code", "")).strip()
-                                    ]
-
-                                    if len(failed_con_codigo) == 1:
-                                        print(f"[DEBUG] Defect code único tomado: {failed_con_codigo[0]['defect_code']}")
-                                        return failed_con_codigo[0]["defect_code"]
-
-                                    if len(failed_con_codigo) > 1:
-                                        print(
-                                            "[WARNING] Varias fallas. "
-                                            f"Usando última falla con código: {failed_con_codigo[-1]['defect_code']}"
-                                        )
-                                        return failed_con_codigo[-1]["defect_code"]
-
-                                    print("[ERROR] No se pudo determinar defect_code para RecordDefect.")
-                                    print("[ERROR] Failed steps encontrados:")
-                                    print(json_pretty(failed_steps))
-
-                                    return ""
-
-                                except Exception as e:
-                                    print(f"[ERROR] Error calculando defect_code desde Traceability: {e}")
-                                    return ""
-
-                            # Si END_PROCESS viene FAILED
-                            # Traceability ya fue enviado.
-                            # Ahora toca Conduit RecordDefect.
-                            # Si quedan intentos: RepairAllDefects.
-                            # Si ya no quedan intentos: End.
-                            if socket_status_raw == "FAILED":
-                                step_defect = calcular_defect_code()
-
-                                if not step_defect or str(step_defect).strip() == "":
-                                    safe_insert(
-                                        "Command received-> " + cadena_original + "\n" +
-                                        "Command FAILED - No se pudo calcular defect_code para RecordDefect\n\n" +
-
-                                        bloque_json_ui(
-                                            "TRACEABILITY",
-                                            request=payload_traceability,
-                                            response=response_traceability_json
-                                        ),
-                                        "red"
-                                    )
-
-                                    print("[ERROR] step_defect vacío. No se enviará RecordDefect.")
-
-                                    try:
-                                        conn.send("FAILED".encode("UTF-8"))
-                                    except Exception as e:
-                                        safe_insert(f"Error enviando: {e}", "red")
-
-                                    green_label.configure(image=image_green)
-                                    red_label.configure(image=image_red_full)
-                                    break
-
-                                payload_record_defect = {
-                                    "version": "1.0",
-                                    "keep_alive": False,
-                                    "refresh_unit": True,
-                                    "source": {
-                                        "workstation": {
-                                            "station": process_name,
-                                            "type": "Process"
-                                        },
-                                        "client_id": client_id_db,
-                                        "employee": operator_id,
-                                        "password": ""
-                                    },
-                                    "transactions": [
-                                        {
-                                            "unit": {
-                                                "unit_id": SERIAL_PADRE_GLOBAL
-                                            },
-                                            "commands": [
-                                                {
-                                                    "name": "RecordDefect",
-                                                    "defect_code": step_defect
-                                                }
-                                            ]
-                                        }
-                                    ]
-                                }
-
-                                response_record, response_record_json = post_api_debug(
-                                    nombre_api="CONDUIT RECORD DEFECT",
-                                    url=url_conduit,
-                                    payload=payload_record_defect,
-                                    timeout=30
-                                )
-
-                                if not conduit_ok(response_record, response_record_json):
-                                    safe_insert(
-                                        "Command received-> " + cadena_original + "\n" +
-                                        "Traceability OK  RecordDefect FAILED\n" +
-                                        "Command FAILED\n\n" +
-                                        bloque_json_ui(
-                                            "TRACEABILITY",
-                                            request=payload_traceability,
-                                            response=response_traceability_json
-                                        ) +
-                                        bloque_json_ui(
-                                            "CONDUIT RECORD DEFECT",
-                                            request=payload_record_defect,
-                                            response=response_record_json
-                                        ),
-                                        "red"
-                                    )
-
-                                    try:
-                                        conn.send("FAILED".encode("UTF-8"))
-                                    except Exception as e:
-                                        safe_insert(f"Error enviando: {e}", "red")
-
-                                    conexionBitacora.event("END-F005", "CONDUIT_RECORD_DEFECT,FAILED", month, day)
-                                    green_label.configure(image=image_green)
-                                    red_label.configure(image=image_red_full)
-                                    break
-
-                                # Aún quedan intentos
-                                if intento_actual < max_intentos:
-                                    payload_repair = {
-                                        "version": "1.0",
-                                        "keep_alive": False,
-                                        "refresh_unit": True,
-                                        "source": {
-                                            "workstation": {
-                                                "station": process_name,
-                                                "type": "Process"
-                                            },
-                                            "client_id": client_id_db,
-                                            "employee": operator_id,
-                                            "password": ""
-                                        },
-                                        "transactions": [
-                                            {
-                                                "unit": {
-                                                    "unit_id": SERIAL_PADRE_GLOBAL
-                                                },
-                                                "commands": [
-                                                    {
-                                                        "name": "RepairAllDefects"
-                                                    }
-                                                ]
-                                            }
-                                        ]
-                                    }
-
-                                    response_repair, response_repair_json = post_api_debug(
-                                        nombre_api="CONDUIT REPAIR ALL DEFECTS",
-                                        url=url_conduit,
-                                        payload=payload_repair,
+                                    response_traceability = requests.post(
+                                        url_traceability,
+                                        json=payload_traceability,
                                         timeout=30
                                     )
 
-                                    if conduit_ok(response_repair, response_repair_json):
-                                        safe_insert(
-                                    "Command received-> " + cadena_original + "\n" +
-                                    f"Traceability OK  RecordDefect OK  RepairAllDefects OK  Intento {intento_actual}/{max_intentos}\n" +
-                                    "Command START-AGAIN\n\n" +
-
-                                    bloque_json_ui(
-                                        "TRACEABILITY",
-                                        request=payload_traceability,
-                                        response=response_traceability_json
-                                    ) +
-
-                                    bloque_json_ui(
-                                        "CONDUIT RECORD DEFECT",
-                                        request=payload_record_defect,
-                                        response=response_record_json
-                                    ) +
-
-                                    bloque_json_ui(
-                                        "CONDUIT REPAIR ALL DEFECTS",
-                                        request=payload_repair,
-                                        response=response_repair_json
-                                    ),
-                                    "orange"
-                                )
-                                        try:
-                                            conn.send("START-AGAIN".encode("UTF-8"))
-                                        except Exception as e:
-                                            safe_insert(f"Error enviando: {e}", "red")
-
-                                        conexionBitacora.event("END-P001", "END_PROCESS,FAILED,START_AGAIN", month, day)
-
+                                    if response_traceability.status_code != 200:
+                                        safe_insert(f"❌ERROR {response_traceability.status_code}]:\n{response_traceability.text}\n", "red")
+                                        logging.error(f"❌ERROR {response_traceability.status_code}]:\n{response_traceability.text}\n")
+                                        conn.send("FAILED, TRACEABILITY ERROR".encode('UTF-8'))
+                                        cadena = ""
                                         green_label.configure(image=image_green)
                                         red_label.configure(image=image_red_full)
+                                        conexionBitacora.event("ENDP-002","|Command received| "+comando_completo + "\n"+str(e),month,day)
+                                        conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+                                        break
+                                        
+                                    json_trace = response_traceability.json()
 
-                                    else:
-                                        safe_insert(
-                                            "Command received-> " + cadena_original + "\n" +
-                                            "Conduit RepairAllDefects FAILED\n\n" +
-                                            bloque_json_ui(
-                                                "TRACEABILITY",
-                                                request=payload_traceability,
-                                                response=response_traceability_json
-                                            ) +
-                                            bloque_json_ui(
-                                                "CONDUIT RECORD DEFECT",
-                                                request=payload_record_defect,
-                                                response=response_record_json
-                                            ) +
-                                            bloque_json_ui(
-                                                "CONDUIT REPAIR ALL DEFECTS",
-                                                request=payload_repair,
-                                                response=response_repair_json
-                                            ),
-                                            "red"
-                                        )
+                                    logging.info(f"[TRACEABILITY RESPONSE JSON]:\n{json.dumps(json_trace, indent=4, ensure_ascii=False)}")
 
-                                        try:
-                                            conn.send("FAILED".encode("UTF-8"))
-                                        except Exception as e:
-                                            safe_insert(f"Error enviando: {e}", "red")
-
-                                        conexionBitacora.event("END-F006", "CONDUIT_REPAIR_ALL_DEFECTS,FAILED", month, day)
+                                    validador_trace = json_trace.get("success")
+                                    if str(validador_trace).lower() not in ("true", "1"):
+                                        msg_err_t = json_trace.get("message", "Traceability validation rejected")
+                                        safe_insert(f"❌ [REJECTED 200]:\n{json.dumps(json_trace, indent=2)}\n", "red")
+                                        logging.error(f"❌ [REJECTED 200]:\n{json.dumps(json_trace, indent=2)}\n")
+                                        conn.send("FAILED, TRACEABILITY REJECT".encode('UTF-8'))
                                         green_label.configure(image=image_green)
                                         red_label.configure(image=image_red_full)
-
-                                # Ya se agotaron intentos
-                                else:
-                                    if intento_actual < max_intentos:
-                                        safe_insert(
-                                            "Command received-> " + cadena_original + "\n" +
-                                            f"Intento {intento_actual}/{max_intentos}: se bloqueó Conduit End porque aún hay reintentos.\n" +
-                                            "Command START-AGAIN\n\n" +
-                                            bloque_json_ui(
-                                                "TRACEABILITY",
-                                                request=payload_traceability,
-                                                response=response_traceability_json
-                                            ) +
-                                            bloque_json_ui(
-                                                "CONDUIT RECORD DEFECT",
-                                                request=payload_record_defect,
-                                                response=response_record_json
-                                            ),
-                                            "orange"
-                                        )
-
-                                        try:
-                                            conn.send("START-AGAIN".encode("UTF-8"))
-                                        except Exception as e:
-                                            safe_insert(f"Error enviando: {e}", "red")
-
-                                        green_label.configure(image=image_green)
-                                        red_label.configure(image=image_red_full)
+                                        conexionBitacora.event("ENDP-002","|Command received| "+comando_completo + "\n"+str(e),month,day)
+                                        conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+                                        cadena = ""
                                         break
 
-                                    payload_end_failed = {
-                                        "version": "1.0",
-                                        "keep_alive": False,
-                                        "refresh_unit": True,
-                                        "source": {
-                                            "workstation": {
-                                                "station": process_name,
-                                                "type": "Process"
-                                            },
-                                            "client_id": client_id_db,
-                                            "employee": operator_id,
-                                            "password": ""
-                                        },
-                                        "transactions": [
-                                            {
-                                                "unit": {
-                                                    "unit_id": SERIAL_PADRE_GLOBAL
-                                                },
-                                                "commands": [
-                                                    {
-                                                        "name": "End"
-                                                    }
-                                                ]
-                                            }
-                                        ]
-                                    }
+                                    # estado_traceability = payload_traceability
+                                    # estado_traceability = estado_traceability.get("status")
+                                    # print(f"Estado Traceability: {estado_traceability}")
 
-                                    response_end_failed, response_end_failed_json = post_api_debug(
-                                        nombre_api="CONDUIT END FAILED",
-                                        url=url_conduit,
-                                        payload=payload_end_failed,
-                                        timeout=30
-                                    )
+                                except Exception as err_trace:
+                                    logging.error(f"Error executing traceability dispatch: {err_trace}")
+                                    safe_insert(f"Traceability Network Error: {str(err_trace)}", "red")
+                                    conn.send("FAILED, TRACEABILITY OFFLINE".encode('UTF-8'))
+                                    cadena = ""
+                                    green_label.configure(image=image_green)
+                                    red_label.configure(image=image_red_full)
+                                    conexionBitacora.event("ENDP-002","|Command received| "+comando_completo + "\n"+str(err_trace),month,day)
+                                    conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+                                    break
 
-                                    if conduit_ok(response_end_failed, response_end_failed_json):
-                                        safe_insert(
-                                            "Command received-> " + cadena_original + "\n" +
-                                            f"Traceability OK  RecordDefect OK  Conduit End OK  Pieza FAILED  Intento {intento_actual}/{max_intentos}\n" +
-                                            "pieza FAILED\n\n" +
-                                            bloque_json_ui(
-                                                "TRACEABILITY",
-                                                request=payload_traceability,
-                                                response=response_traceability_json
-                                            ) +
-                                            bloque_json_ui(
-                                                "CONDUIT RECORD DEFECT",
-                                                request=payload_record_defect,
-                                                response=response_record_json
-                                            ) +
-                                            bloque_json_ui(
-                                                "CONDUIT END FAILED",
-                                                request=payload_end_failed,
-                                                response=response_end_failed_json
-                                            ),
-                                            "red"
-                                        )
+                                if configurador_data == "1":
+                                    
+                                    if estado_general == "FAILED":
+                                        ##################################################### LLAMADA A CONDUIT DEFECT CODE #####################################################
+                                                                            
+                                        if not url_conduit or url_conduit == "FAILED":
+                                            safe_insert("❌ Error obteniendo URL Conduit de DB.", "red")
+                                            conn.send("FAILED".encode('UTF-8'))
+                                            green_label.configure(image=image_green)
+                                            red_label.configure(image=image_red_full)
+                                            break
+        
+                                        payload_conduit_defect_code = conduit_json.conduit_st60_v3(name_piece,2, defect_code)
+    
+                                        response_conduit = requests.post(url_conduit, json=payload_conduit_defect_code, timeout=30)
+    
+                                        if response_conduit.status_code != 200:
+                                            safe_insert(f"Interlocking HTTP {response_conduit.status_code}", "red")
+                                            conn.send(f"FAILED".encode('UTF-8'))
+                                            green_label.configure(image=image_green)
+                                            red_label.configure(image=image_red_full)
+                                            break
+                                        
+                                        data_conduit = response_conduit.json()
+    
+                                        llamada_conduit = data_conduit.get("success", False)
+                                        
+                                        if llamada_conduit == "false":
+                                            error_msg = data_conduit.get("message", "Unknown error")
+                                            logging.error(f"CONDUIT denied: {error_msg}")
+                                            safe_insert(f"❌ CONDUIT API FAILED: {json.dumps(data_conduit, indent=2)}", "red")
+                                            green_label.configure(image=image_green)
+                                            red_label.configure(image=image_red_full)
+                                            conn.send("FAILED".encode('UTF-8'))
+                                            conexionBitacora.event("ENDP-002","|Command received| "+comando_completo + "\n"+str(e),month,day)
+                                            conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+                                            break
+                                        
+                                        if isinstance(data_conduit, list):
+                                            data_conduit = data_conduit[0] if len(data_conduit) > 0 else {}
+                                        
+                                            logging.info(f"[CONDUIT RESPONSE]:\n{json.dumps(data_conduit, indent=4, ensure_ascii=False)}")
 
-                                        try:
-                                            conn.send("FAILED".encode("UTF-8"))
-                                        except Exception as e:
-                                            safe_insert(f"Error enviando: {e}", "red")
+                                        ######################################################### VERIFICAR ÚLTIMO INTENTO #########################################################
 
-                                        try:
-                                            conn.send("RELEASE_PIECE, FAILED".encode("UTF-8"))
-                                        except Exception as e:
-                                            safe_insert(f"Error enviando RELEASE_PIECE FAILED: {e}", "red")
+                                        if option[-3] == "ultimo":
+                                            payload_conduit_end = conduit_json.conduit_st60_v3(name_piece,4, "")
+                                                                                        
+                                            response_conduit_end = requests.post(url_conduit, json=payload_conduit_end, timeout=30)
+        
+                                            if response_conduit_end.status_code != 200:
+                                                safe_insert(f"CONDUIT HTTP {response_conduit_end.status_code}", "red")
+                                                conn.send(f"FAILED".encode('UTF-8'))
+                                                green_label.configure(image=image_green)
+                                                red_label.configure(image=image_red_full)
+                                                break
+                                            
+                                            data_conduit_end = response_conduit_end.json()
+        
+                                            llamada_conduit_end = data_conduit_end.get("success", False)
+                                            
+                                            if llamada_conduit_end == "false":
+                                                error_msg = data_conduit_end.get("message", "Unknown error")
+                                                logging.error(f"CONDUIT denied: {error_msg}")
+                                                safe_insert(f"❌ CONDUIT API FAILED: {json.dumps(data_conduit_end, indent=2)}", "red")
+                                                green_label.configure(image=image_green)
+                                                red_label.configure(image=image_red_full)
+                                                conexionBitacora.event("ENDP-002","|Command received| "+comando_completo + "\n"+str(e),month,day)
+                                                conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+                                                conn.send("FAILED".encode('UTF-8'))
+                                                break
+                                            
+                                            if isinstance(data_conduit_end, list):
+                                                data_conduit_end = data_conduit_end[0] if len(data_conduit_end) > 0 else {}
+                                            
+                                                logging.info(f"[CONDUIT RESPONSE]:\n{json.dumps(data_conduit_end, indent=4, ensure_ascii=False)}")
 
-                                        try:
-                                            parte_actual = conexion.obtener_parte(SERIAL_PADRE_GLOBAL)
-                                            station_actual = conexion.stations()
-
-                                            if parte_actual and parte_actual != "FAILED" and station_actual:
-                                                part_id = parte_actual[0]
-                                                station_id = station_actual[0]
-
-                                                if hasattr(conexion, "duration_end_st60"):
-                                                    conexion.duration_end_st60(station_id, part_id, "FAIL")
-
-                                                print(
-                                                    f"[DURATION] Fin registrado station_id={station_id} "
-                                                    f"part_id={part_id} status=FAIL"
-                                                )
-
-                                        except Exception as e:
-                                            print(f"[DURATION WARNING] No se pudo cerrar duration: {e}")
-
-                                        SERIAL_PADRE_GLOBAL = ""
-                                        PART_NUMBER_GLOBAL = ""
-                                        MEASUREMENT_KEY_GLOBAL = ""
-                                        START_SCREWING_ID_GLOBAL = 0
-                                        COMPONENT = ""
-
-                                        print("[INFO] Pieza liberada localmente como FAILED.")
-
-                                        conexionBitacora.event("END-F007", "END_PROCESS,FAILED,MAX_ATTEMPTS", month, day)
-
-                                        green_label.configure(image=image_green)
-                                        red_label.configure(image=image_red_full)
-
-                                    else:
-                                        safe_insert(
-                                            "Command received-> " + cadena_original + "\n" +
-                                            "Conduit End FAILED\n\n" +
-                                            bloque_json_ui(
-                                                "TRACEABILITY",
-                                                request=payload_traceability,
-                                                response=response_traceability_json
-                                            ) +
-                                            bloque_json_ui(
-                                                "CONDUIT RECORD DEFECT",
-                                                request=payload_record_defect,
-                                                response=response_record_json
-                                            ) +
-                                            bloque_json_ui(
-                                                "CONDUIT END FAILED",
-                                                request=payload_end_failed,
-                                                response=response_end_failed_json
-                                            ),
-                                            "red"
-                                        )
-
-                                        try:
-                                            conn.send("FAILED".encode("UTF-8"))
-                                        except Exception as e:
-                                            safe_insert(f"Error enviando: {e}", "red")
-
-                                        conexionBitacora.event("END-F008", "CONDUIT_END,FAILED", month, day)
-                                        green_label.configure(image=image_green)
-                                        red_label.configure(image=image_red_full)
-
-                            # Si END_PROCESS viene PASSED
-                            # Traceability ya fue enviado.
-                            # Ahora toca Conduit End y liberar pieza OK.
-                            else:
-                                payload_end_passed = {
-                                    "version": "1.0",
-                                    "keep_alive": False,
-                                    "refresh_unit": True,
-                                    "source": {
-                                        "workstation": {
-                                            "station": process_name,
-                                            "type": "Process"
-                                        },
-                                        "client_id": client_id_db,
-                                        "employee": operator_id,
-                                        "password": ""
-                                    },
-                                    "transactions": [
-                                        {
-                                            "unit": {
-                                                "unit_id": SERIAL_PADRE_GLOBAL
-                                            },
-                                            "commands": [
-                                                {
-                                                    "name": "End"
-                                                }
-                                            ]
-                                        }
-                                    ]
-                                }
-
-                                response_end_passed, response_end_passed_json = post_api_debug(
-                                    nombre_api="CONDUIT END PASSED",
-                                    url=url_conduit,
-                                    payload=payload_end_passed,
-                                    timeout=30
-                                )
-
-                                if conduit_ok(response_end_passed, response_end_passed_json):
-                                    safe_insert(
-                                        "Command received-> " + cadena_original + "\n" +
-                                        "Traceability OK  Conduit End OK  Pieza PASSED\n" +
-                                        "Command PASSED\n\n" +
-                                        bloque_json_ui(
-                                            "TRACEABILITY",
-                                            request=payload_traceability,
-                                            response=response_traceability_json
-                                        ) +
-                                        bloque_json_ui(
-                                            "CONDUIT END PASSED",
-                                            request=payload_end_passed,
-                                            response=response_end_passed_json
-                                        ),
-                                        "green"
-                                    )
-
-                                    try:
-                                        conn.send("PASSED".encode("UTF-8"))
-                                    except Exception as e:
-                                        safe_insert(f"Error enviando: {e}", "red")
-
-                                    try:
-                                        conn.send("RELEASE_PIECE, PASSED".encode("UTF-8"))
-                                    except Exception as e:
-                                        safe_insert(f"Error enviando RELEASE_PIECE PASSED: {e}", "red")
-
-                                    try:
-                                        parte_actual = conexion.obtener_parte(SERIAL_PADRE_GLOBAL)
-                                        station_actual = conexion.stations()
-
-                                        if parte_actual and parte_actual != "FAILED" and station_actual:
-                                            part_id = parte_actual[0]
-                                            station_id = station_actual[0]
-
-                                            if hasattr(conexion, "duration_end_st60"):
-                                                conexion.duration_end_st60(station_id, part_id, "PASS")
-
-                                            print(
-                                                f"[DURATION] Fin registrado station_id={station_id} "
-                                                f"part_id={part_id} status=PASS"
+                                            pantalla_final = (
+                                                f"Command received-> {comando_completo}\nCommand PASSED\n"
+                                                f"[TRACEABILITY JSON]:\n{json.dumps(payload_traceability, indent=4, ensure_ascii=False)}"
+                                                f"[TRACEABILITY RESPONSE]:\n{json.dumps(json_trace, indent=4, ensure_ascii=False)}\n\n"
+                                                f"[API CONDUIT URL]:\n{url_conduit}\n"
+                                                f"[API CONDUIT REQUEST RECORD DEFECT]:\n{json.dumps(payload_conduit_defect_code, indent=2)}\n\n"
+                                                f"[API CONDUIT RESPONSE RECORD DEFECT]:\n{json.dumps(data_conduit, indent=2)}\n\n"
+                                                f"[API CONDUIT REQUEST END PROCESS]:\n{json.dumps(payload_conduit_end, indent=2)}\n\n"
+                                                f"[API CONDUIT RESPONSE END PROCESS]:\n{json.dumps(data_conduit_end, indent=2)}\n\n"
                                             )
 
-                                    except Exception as e:
-                                        print(f"[DURATION WARNING] No se pudo cerrar duration: {e}")
+                                        else:
 
-                                    SERIAL_PADRE_GLOBAL = ""
-                                    PART_NUMBER_GLOBAL = ""
-                                    MEASUREMENT_KEY_GLOBAL = ""
-                                    START_SCREWING_ID_GLOBAL = 0
-                                    COMPONENT = ""
+                                            ##################################################### LLAMADA A CONDUIT REPAIR ALL DEFECTS #####################################################
+                                            
+                                            payload_conduit_repair = conduit_json.conduit_st60_v3(name_piece,3, "")
+                                                
+                                            response_conduit_repair = requests.post(url_conduit, json=payload_conduit_repair, timeout=30)
+        
+                                            if response_conduit_repair.status_code != 200:
+                                                safe_insert(f"CONDUIT HTTP {response_conduit_repair.status_code}", "red")
+                                                conn.send(f"FAILED".encode('UTF-8'))
+                                                green_label.configure(image=image_green)
+                                                red_label.configure(image=image_red_full)
+                                                break
+                                            
+                                            data_conduit_repair = response_conduit_repair.json()
+        
+                                            llamada_conduit = data_conduit_repair.get("success", False)
+                                            
+                                            if llamada_conduit == "false":
+                                                error_msg = data_conduit_repair.get("message", "Unknown error")
+                                                logging.error(f"CONDUIT denied: {error_msg}")
+                                                safe_insert(f"❌ CONDUIT API FAILED: {json.dumps(data_conduit_repair, indent=2)}", "red")
+                                                green_label.configure(image=image_green)
+                                                red_label.configure(image=image_red_full)
+                                                conexionBitacora.event("ENDP-002","|Command received| "+comando_completo + "\n"+str(e),month,day)
+                                                conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+                                                conn.send("FAILED".encode('UTF-8'))
+                                                break
+                                            
+                                            if isinstance(data_conduit_repair, list):
+                                                data_conduit_repair = data_conduit_repair[0] if len(data_conduit_repair) > 0 else {}
+                                            
+                                                logging.info(f"[CONDUIT RESPONSE]:\n{json.dumps(data_conduit_repair, indent=4, ensure_ascii=False)}")
 
-                                    print("[INFO] Pieza liberada localmente como PASSED.")
+                                            pantalla_final = (
+                                                f"Command received-> {comando_completo}\nCommand PASSED\n"
+                                                f"[TRACEABILITY JSON]:\n{json.dumps(payload_traceability, indent=4, ensure_ascii=False)}"
+                                                f"[TRACEABILITY RESPONSE]:\n{json.dumps(json_trace, indent=4, ensure_ascii=False)}\n\n"
+                                                f"[API CONDUIT URL]:\n{url_conduit}\n"
+                                                f"[API CONDUIT REQUEST RECORD DEFECT]:\n{json.dumps(payload_conduit_defect_code, indent=2)}\n\n"
+                                                f"[API CONDUIT RESPONSE RECORD DEFECT]:\n{json.dumps(data_conduit, indent=2)}\n\n"
+                                                f"[API CONDUIT REQUEST REPAIR ALL DEFECTS]:\n{json.dumps(payload_conduit_repair, indent=2)}\n\n"
+                                                f"[API CONDUIT RESPONSE REPAIR ALL DEFECTS]:\n{json.dumps(data_conduit_repair, indent=2)}\n\n"
+                                            )
 
-                                    conexionBitacora.event("END-P002", "END_PROCESS,PASSED", month, day)
+                                        
+                                        #############################################################################################################################
+                                    else:
+                                        ######################################################### VERIFICAR ÚLTIMO INTENTO #########################################################
+                                        
+                                        payload_conduit_end = conduit_json.conduit_st60_v3(name_piece,4, "")
+                                                                                    
+                                        response_conduit_end = requests.post(url_conduit, json=payload_conduit_end, timeout=30)
 
-                                    green_label.configure(image=image_green_full)
-                                    red_label.configure(image=image_red)
+                                        if response_conduit_end.status_code != 200:
+                                            safe_insert(f"CONDUIT HTTP {response_conduit_end.status_code}", "red")
+                                            conn.send(f"FAILED".encode('UTF-8'))
+                                            green_label.configure(image=image_green)
+                                            red_label.configure(image=image_red_full)
+                                            break
+                                        
+                                        data_conduit_end = response_conduit_end.json()
+
+                                        llamada_conduit_end = data_conduit_end.get("success", False)
+                                        
+                                        if llamada_conduit_end == "false":
+                                            error_msg = data_conduit_end.get("message", "Unknown error")
+                                            logging.error(f"CONDUIT denied: {error_msg}")
+                                            safe_insert(f"❌ CONDUIT API FAILED: {json.dumps(data_conduit_end, indent=2)}", "red")
+                                            green_label.configure(image=image_green)
+                                            red_label.configure(image=image_red_full)
+                                            conexionBitacora.event("ENDP-002","|Command received| "+comando_completo + "\n"+str(e),month,day)
+                                            conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+                                            conn.send("FAILED".encode('UTF-8'))
+                                            break
+                                        
+                                        if isinstance(data_conduit_end, list):
+                                            data_conduit_end = data_conduit_end[0] if len(data_conduit_end) > 0 else {}
+                                        
+                                            logging.info(f"[CONDUIT RESPONSE]:\n{json.dumps(data_conduit_end, indent=4, ensure_ascii=False)}")
+
+                                        pantalla_final = (
+                                            f"Command received-> {comando_completo}\nCommand PASSED\n"
+                                            f"[TRACEABILITY JSON]:\n{json.dumps(payload_traceability, indent=4, ensure_ascii=False)}"
+                                            f"[TRACEABILITY RESPONSE]:\n{json.dumps(json_trace, indent=4, ensure_ascii=False)}\n\n"
+                                            f"[API CONDUIT URL]:\n{url_conduit}\n"
+                                            f"[API CONDUIT REQUEST END PROCESS]:\n{json.dumps(payload_conduit_end, indent=2)}\n\n"
+                                            f"[API CONDUIT RESPONSE END PROCESS]:\n{json.dumps(data_conduit_end, indent=2)}\n\n"
+                                        )
 
                                 else:
-                                    if getattr(response_end_passed, "status_code", 0) in [200, 201]:
-                                        safe_insert(
-                                            "Command received-> " + cadena_original + "\n" +
-                                            "Traceability OK\n" +
-                                            "Conduit End PASS enviado con advertencia\n" +
-                                            "Resultado final de pieza: PASSED\n" +
-                                            "Nota: hubo una advertencia en la respuesta de Conduit, "
-                                            "pero no es fallo final de pieza.\n" +
-                                            "Command PASSED\n\n" +
-                                            bloque_json_ui(
-                                                "TRACEABILITY",
-                                                request=payload_traceability,
-                                                response=response_traceability_json
-                                            ) +
-                                            bloque_json_ui(
-                                                "CONDUIT END PASSED WARNING",
-                                                request=payload_end_passed,
-                                                response=response_end_passed_json
-                                            ),
-                                            "green"
+                                    if estado_general == "FAILED":
+                                        ##################################################### LLAMADA A CONDUIT DEFECT CODE #####################################################
+                                                                            
+                                        if not url_conduit or url_conduit == "FAILED":
+                                            safe_insert("❌ Error obteniendo URL Conduit de DB.", "red")
+                                            conn.send("FAILED".encode('UTF-8'))
+                                            green_label.configure(image=image_green)
+                                            red_label.configure(image=image_red_full)
+                                            break
+        
+                                        payload_conduit_defect_code = conduit_json.conduit_st60_v3(name_piece,2, defect_code)
+    
+                                        response_conduit = requests.post(url_conduit, json=payload_conduit_defect_code, timeout=30)
+    
+                                        if response_conduit.status_code != 200:
+                                            safe_insert(f"Interlocking HTTP {response_conduit.status_code}", "red")
+                                            conn.send(f"FAILED".encode('UTF-8'))
+                                            green_label.configure(image=image_green)
+                                            red_label.configure(image=image_red_full)
+                                            break
+                                        
+                                        data_conduit = response_conduit.json()
+    
+                                        llamada_conduit = data_conduit.get("success", False)
+                                        
+                                        if llamada_conduit == "false":
+                                            error_msg = data_conduit.get("message", "Unknown error")
+                                            logging.error(f"CONDUIT denied: {error_msg}")
+                                            safe_insert(f"❌ CONDUIT API FAILED: {json.dumps(data_conduit, indent=2)}", "red")
+                                            green_label.configure(image=image_green)
+                                            red_label.configure(image=image_red_full)
+                                            conn.send("FAILED".encode('UTF-8'))
+                                            conexionBitacora.event("ENDP-002","|Command received| "+comando_completo + "\n"+str(e),month,day)
+                                            conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+                                            break
+                                        
+                                        if isinstance(data_conduit, list):
+                                            data_conduit = data_conduit[0] if len(data_conduit) > 0 else {}
+                                        
+                                            logging.info(f"[CONDUIT RESPONSE]:\n{json.dumps(data_conduit, indent=4, ensure_ascii=False)}")
+
+                                        payload_conduit_end = conduit_json.conduit_st60_v3(name_piece,4, "")
+                                                                                                                                
+                                        response_conduit_end = requests.post(url_conduit, json=payload_conduit_end, timeout=30)
+    
+                                        if response_conduit_end.status_code != 200:
+                                            safe_insert(f"CONDUIT HTTP {response_conduit_end.status_code}", "red")
+                                            conn.send(f"FAILED".encode('UTF-8'))
+                                            green_label.configure(image=image_green)
+                                            red_label.configure(image=image_red_full)
+                                            break
+
+                                        ############################################################### CONDUIT END ################################################
+                                        payload_conduit_end = conduit_json.conduit_st60_v3(name_piece,4, "")
+                                                                                                                                
+                                        response_conduit_end = requests.post(url_conduit, json=payload_conduit_end, timeout=30)
+    
+                                        if response_conduit_end.status_code != 200:
+                                            safe_insert(f"CONDUIT HTTP {response_conduit_end.status_code}", "red")
+                                            conn.send(f"FAILED".encode('UTF-8'))
+                                            green_label.configure(image=image_green)
+                                            red_label.configure(image=image_red_full)
+                                            break
+                                        
+                                        data_conduit_end = response_conduit_end.json()
+    
+                                        llamada_conduit_end = data_conduit_end.get("success", False)
+                                        
+                                        if llamada_conduit_end == "false":
+                                            error_msg = data_conduit_end.get("message", "Unknown error")
+                                            logging.error(f"CONDUIT denied: {error_msg}")
+                                            safe_insert(f"❌ CONDUIT API FAILED: {json.dumps(data_conduit_end, indent=2)}", "red")
+                                            green_label.configure(image=image_green)
+                                            red_label.configure(image=image_red_full)
+                                            conexionBitacora.event("ENDP-002","|Command received| "+comando_completo + "\n"+str(e),month,day)
+                                            conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+                                            conn.send("FAILED".encode('UTF-8'))
+                                            break
+                                        
+                                        if isinstance(data_conduit_end, list):
+                                            data_conduit_end = data_conduit_end[0] if len(data_conduit_end) > 0 else {}
+                                        
+                                            logging.info(f"[CONDUIT RESPONSE]:\n{json.dumps(data_conduit_end, indent=4, ensure_ascii=False)}")
+
+                                        pantalla_final = (
+                                            f"Command received-> {comando_completo}\nCommand PASSED\n"
+                                            f"[TRACEABILITY JSON]:\n{json.dumps(payload_traceability, indent=4, ensure_ascii=False)}"
+                                            f"[TRACEABILITY RESPONSE]:\n{json.dumps(json_trace, indent=4, ensure_ascii=False)}\n\n"
+                                            f"[API CONDUIT URL]:\n{url_conduit}\n"
+                                            f"[API CONDUIT REQUEST RECORD DEFECT]:\n{json.dumps(payload_conduit_defect_code, indent=2)}\n\n"
+                                            f"[API CONDUIT RESPONSE RECORD DEFECT]:\n{json.dumps(data_conduit, indent=2)}\n\n"
+                                            f"[API CONDUIT REQUEST END PROCESS]:\n{json.dumps(payload_conduit_end, indent=2)}\n\n"
+                                            f"[API CONDUIT RESPONSE END PROCESS]:\n{json.dumps(data_conduit_end, indent=2)}\n\n"
                                         )
-
-                                        try:
-                                            conn.send("PASSED".encode("UTF-8"))
-                                        except Exception as e:
-                                            safe_insert(f"Error enviando: {e}", "red")
-
-                                        try:
-                                            conn.send("RELEASE_PIECE, PASSED".encode("UTF-8"))
-                                        except Exception as e:
-                                            safe_insert(f"Error enviando RELEASE_PIECE PASSED: {e}", "red")
-
-                                        try:
-                                            parte_actual = conexion.obtener_parte(SERIAL_PADRE_GLOBAL)
-                                            station_actual = conexion.stations()
-
-                                            if parte_actual and parte_actual != "FAILED" and station_actual:
-                                                part_id = parte_actual[0]
-                                                station_id = station_actual[0]
-
-                                                if hasattr(conexion, "duration_end_st60"):
-                                                    conexion.duration_end_st60(station_id, part_id, "PASS")
-
-                                                print(
-                                                    f"[DURATION] Fin registrado station_id={station_id} "
-                                                    f"part_id={part_id} status=PASS"
-                                                )
-
-                                        except Exception as e:
-                                            print(f"[DURATION WARNING] No se pudo cerrar duration: {e}")
-
-                                        SERIAL_PADRE_GLOBAL = ""
-                                        PART_NUMBER_GLOBAL = ""
-                                        MEASUREMENT_KEY_GLOBAL = ""
-                                        START_SCREWING_ID_GLOBAL = 0
-                                        COMPONENT = ""
-
-                                        print("[INFO] Pieza liberada localmente como PASSED con advertencia de Conduit.")
-
-                                        conexionBitacora.event("END-P002", "END_PROCESS,PASSED,CONDUIT_WARNING", month, day)
-
-                                        green_label.configure(image=image_green_full)
-                                        red_label.configure(image=image_red)
 
                                     else:
-                                        safe_insert(
-                                            "Command received-> " + cadena_original + "\n" +
-                                            "Pieza PASSED, pero Conduit End PASS no fue aceptado.\n" +
-                                            "Command FAILED\n\n" +
-                                            bloque_json_ui(
-                                                "TRACEABILITY",
-                                                request=payload_traceability,
-                                                response=response_traceability_json
-                                            ) +
-                                            bloque_json_ui(
-                                                "CONDUIT END PASS ERROR",
-                                                request=payload_end_passed,
-                                                response=response_end_passed_json
-                                            ),
-                                            "red"
+                                        ############################################################### CONDUIT END ################################################
+                                        payload_conduit_end = conduit_json.conduit_st60_v3(name_piece,4, "")
+                                                                                                                                
+                                        response_conduit_end = requests.post(url_conduit, json=payload_conduit_end, timeout=30)
+    
+                                        if response_conduit_end.status_code != 200:
+                                            safe_insert(f"CONDUIT HTTP {response_conduit_end.status_code}", "red")
+                                            conn.send(f"FAILED".encode('UTF-8'))
+                                            green_label.configure(image=image_green)
+                                            red_label.configure(image=image_red_full)
+                                            break
+                                        
+                                        data_conduit_end = response_conduit_end.json()
+    
+                                        llamada_conduit_end = data_conduit_end.get("success", False)
+                                        
+                                        if llamada_conduit_end == "false":
+                                            error_msg = data_conduit_end.get("message", "Unknown error")
+                                            logging.error(f"CONDUIT denied: {error_msg}")
+                                            safe_insert(f"❌ CONDUIT API FAILED: {json.dumps(data_conduit_end, indent=2)}", "red")
+                                            green_label.configure(image=image_green)
+                                            red_label.configure(image=image_red_full)
+                                            conexionBitacora.event("ENDP-002","|Command received| "+comando_completo + "\n"+str(e),month,day)
+                                            conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+                                            conn.send("FAILED".encode('UTF-8'))
+                                            break
+                                        
+                                        if isinstance(data_conduit_end, list):
+                                            data_conduit_end = data_conduit_end[0] if len(data_conduit_end) > 0 else {}
+                                        
+                                            logging.info(f"[CONDUIT RESPONSE]:\n{json.dumps(data_conduit_end, indent=4, ensure_ascii=False)}")
+
+                                        pantalla_final = (
+                                            f"Command received-> {comando_completo}\nCommand PASSED\n"
+                                            f"[TRACEABILITY JSON]:\n{json.dumps(payload_traceability, indent=4, ensure_ascii=False)}"
+                                            f"[TRACEABILITY RESPONSE]:\n{json.dumps(json_trace, indent=4, ensure_ascii=False)}\n\n"
+                                            f"[API CONDUIT URL]:\n{url_conduit}\n"
+                                            f"[API CONDUIT REQUEST END PROCESS]:\n{json.dumps(payload_conduit_end, indent=2)}\n\n"
+                                            f"[API CONDUIT RESPONSE END PROCESS]:\n{json.dumps(data_conduit_end, indent=2)}\n\n"
                                         )
+                                    ##################################################################################################################
+                                safe_insert(pantalla_final, "green")
+                                try:
+                                    conn.send("PASSED".encode('UTF-8'))
+                                    green_label.configure(image=image_green_full)
+                                    red_label.configure(image=image_red)
+                                    conexionBitacora.event("ENDP-001","|Command received| "+comando_completo,month,day)
+                                    conexionBitacora.event("CMD-P001","|Command,PASSED|",month,day)
 
-                                        try:
-                                            conn.send("FAILED".encode("UTF-8"))
-                                        except Exception as e:
-                                            safe_insert(f"Error enviando: {e}", "red")
+                                except Exception as e:
+                                    safe_insert(f"Error enviando: {e}", "red")
+                                    conexionBitacora.event("ENDP-002","|Command received| "+comando_completo + "\n"+str(e),month,day)
+                                    conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+                                    green_label.configure(image=image_green)
+                                    red_label.configure(image=image_red_full)
 
-                                        conexionBitacora.event("END-F009", "CONDUIT_END_PASS,HTTP_FAILED", month, day)
-                                        green_label.configure(image=image_green)
-                                        red_label.configure(image=image_red_full)
-                        except Exception as e:
-                            safe_insert(
-                                "Command received-> " + cadena_original + "\n" +
-                                f"END_PROCESS ERROR: {e}\n" +
-                                "Command FAILED\n",
-                                "red"
-                            )
 
-                            print(f"[END PROCESS ERROR] {e}")
+                                # # Obtener formatos habilitados
+                                # enabled_formats = conexion.get_enabled_export_formats()
+                                # # safe_insert(f"Supported formats: {', '.join(enabled_formats) if enabled_formats else 'None'}\n")
 
+                                # # Variables para resultados
+                                # json_result = None
+                                # csv_result = None
+                                # xml_result = None
+                                # any_file_created = False
+                                # errors = []
+
+                                # # Generar archivos según formatos habilitados
+                                # if 'JSON' in enabled_formats:
+                                #     print("Generating JSON file...")
+                                #     try:
+                                #         file_json = data_json.json_file(option[4])
+                                #         json_result = file_json
+                                #         if file_json == "PASSED":
+                                #             any_file_created = True
+                                #             # safe_insert("✓ JSON file successfully generated\n")
+                                #         else:
+                                #             errors.append(f"JSON: {file_json}")
+                                #             safe_insert(f"✗ JSON Error: {file_json}\n", "red")
+                                #     except Exception as e:
+                                #         errors.append(f"JSON: {str(e)}")
+                                #         print(errors)
+                                #         safe_insert(f"✗ JSON Exception: {str(e)}\n", "red")
+                                    
+                                # if 'CSV' in enabled_formats:
+                                #     try:
+                                #         # Importar aquí para evitar dependencia si no está habilitado
+                                #         import data_csv_60
+                                #         file_csv = data_csv_60.csv_file()
+                                #         csv_result = file_csv
+                                #         if file_csv == "PASSED":
+                                #             any_file_created = True
+                                #             # safe_insert("✓ CSV file successfully generated\n")
+                                #         else:
+                                #             errors.append(f"CSV: {file_csv}")
+                                #             safe_insert(f"✗ CSV Error: {file_csv}\n", "red")
+                                #     except ImportError:
+                                #         errors.append("CSV: Módulo no encontrado")
+                                #         safe_insert("✗ CSV module not available\n", "red")
+                                #     except Exception as e:
+                                #         errors.append(f"CSV: {str(e)}")
+                                #         safe_insert(f"✗ CSV Exception: {str(e)}\n", "red")
+                                    
+                                # if 'XML' in enabled_formats:
+                                #     try:
+                                #         # Importar aquí para evitar dependencia si no está habilitado
+                                #         import data_xml
+                                #         file_xml = data_xml.xml_file()
+                                #         xml_result = file_xml
+                                #         if file_xml == "PASSED":
+                                #             any_file_created = True
+                                #             # safe_insert("✓ XML file successfully generated\n")
+                                #         else:
+                                #             errors.append(f"XML: {file_xml}")
+                                #             safe_insert(f"✗ XML Error: {file_xml}\n", "red")
+                                #     except ImportError:
+                                #         errors.append("XML: Módulo no encontrado")
+                                #         safe_insert("✗ XML module not available\n", "red")
+                                #     except Exception as e:
+                                #         errors.append(f"XML: {str(e)}")
+                                #         safe_insert(f"✗ XML Exception: {str(e)}\n", "red")
+                                    
+                                # # Verificar resultados
+                                # if not enabled_formats:
+                                #     safe_insert("⚠ No export formats enabled\n", "orange")
+                                #     conexionBitacora.event("ENDP-003", "|No export formats enabled|", month, day)
+                                #     conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
+                                #     green_label.configure(image=image_green_full)
+                                #     red_label.configure(image=image_red)
+                                    
+                                # elif errors:
+                                #     # Hubo errores en algunos formatos
+                                #     error_message = "; ".join(errors)
+                                #     safe_insert(f"⚠ Some files were not generated: {error_message}\n", "orange")
+                                    
+                                #     if any_file_created:
+                                #         # Al menos un archivo se creó exitosamente
+                                #         safe_insert("✓ At least one file was successfully generated\n")
+                                #         conexionBitacora.event("ENDP-004", f"|Partial export| {error_message}", month, day)
+                                #         conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
+                                #         green_label.configure(image=image_green_full)
+                                #         red_label.configure(image=image_red)
+                                #     else:
+                                #         # Ningún archivo se creó
+                                #         safe_insert("✗ No file could be generated\n", "red")
+                                #         try:
+                                #             conn.send("FAILED".encode('UTF-8'))
+                                #         except Exception as e:
+                                #             safe_insert(f"Error enviando: {e}", "red")
+                                            
+                                #         conexionBitacora.event("ENDP-002", f"|No files created| {error_message}", month, day)
+                                #         conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
+                                #         green_label.configure(image=image_green)
+                                #         red_label.configure(image=image_red_full)
+                                
+                                # else:
+                                #     # Todos los formatos habilitados se generaron exitosamente
+                                #     # safe_insert("✓ All files were successfully generated\n")
+                                #     conexionBitacora.event("ENDP-001", "|Command received| " + cadena, month, day)
+                                #     conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
+                                #     green_label.configure(image=image_green_full)
+                                #     red_label.configure(image=image_red)
+                                        
+                            else:
+                                try:
+                                    conn.send("FAILED".encode('UTF-8'))
+                                except Exception as e:
+                                    safe_insert(f"Error enviando: {e}", "red")
+                                safe_insert("Command received-> "+comando_completo+"\n"+"Command FAILED"+"\n","red")
+                                conexionBitacora.event("ENDP-002","|Command received| "+comando_completo,month,day)
+                                conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+
+                                green_label.configure(image=image_green)
+                                red_label.configure(image=image_red_full)
+                        else:
                             try:
-                                conn.send("FAILED".encode("UTF-8"))
-                            except Exception as send_error:
-                                safe_insert(f"Error enviando: {send_error}", "red")
+                                conn.send("FAILED".encode('UTF-8'))
+                            except Exception as e:
+                                safe_insert(f"Error enviando: {e}", "red")
+                            safe_insert("Command received-> "+comando_completo+"\n"+"Command FAILED"+"\n","red")
 
-                            conexionBitacora.event("END-F999", f"END_PROCESS,EXCEPTION {e}", month, day)
+                            conexionBitacora.event("ENDP-002","|Command received| "+comando_completo,month,day)
+                            conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
 
                             green_label.configure(image=image_green)
                             red_label.configure(image=image_red_full)
-
-                        finally:
-                            cadena = ""
-                            pieza = ""
+                                    
+                        cadena = ""
+                        pieza = ""
+                    
 
                     case "new_model":
                         clear_table_data()
@@ -2512,22 +1719,22 @@ def worker(conn, addr):
                             new_models = conexion.new_model(option[1])
                             new_models = new_models[1]
                             model_name.set(new_models)
-                            safe_insert("Command received-> "+cadena+"\n"+"Command NEW MODEL PASSED"+"\n")
+                            safe_insert("Command received-> "+comando_completo+"\n"+"Command NEW MODEL PASSED"+"\n")
                             try:
                                 conn.send("PASSED".encode('UTF-8'))
                             except Exception as e:
                                 safe_insert(f"Error enviando: {e}", "red")
-                            conexionBitacora.event("NMP-001","Command received "+cadena,month,day)
+                            conexionBitacora.event("NMP-001","Command received "+comando_completo,month,day)
                             conexionBitacora.event("CMD-P001","Command,PASSED",month,day)
                             green_label.configure(image=image_green_full)
                             red_label.configure(image=image_red)
                         else:
-                            safe_insert("Command received-> "+cadena+"\n"+"Command FAILED"+"\n", "red")
+                            safe_insert("Command received-> "+comando_completo+"\n"+"Command FAILED"+"\n", "red")
                             try:
                                 conn.send("FAILED".encode('UTF-8'))
                             except Exception as e:
                                 safe_insert(f"Error enviando: {e}", "red")
-                            conexionBitacora.event("NMP-002","Command received "+cadena,month,day)
+                            conexionBitacora.event("NMP-002","Command received "+comando_completo,month,day)
                             conexionBitacora.event("CMD-F001","Command,FAILED",month,day)
                             green_label.configure(image=image_green)
                             red_label.configure(image=image_red_full)
@@ -2541,34 +1748,34 @@ def worker(conn, addr):
                             if(modelName == "0"):
                                 modelName = "Unregistered model"
                                 model_name.set(modelName)
-                                safe_insert("Command received-> "+cadena+ " Model: " +modelName+"\n"+"Command FAILED"+"\n", "red")
+                                safe_insert("Command received-> "+comando_completo+ " Model: " +modelName+"\n"+"Command FAILED"+"\n", "red")
                                 try:
                                     conn.send("FAILED".encode('UTF-8'))
                                 except Exception as e:
                                     safe_insert(f"Error enviando: {e}", "red")
-                                conexionBitacora.event("SMP-002","Command received "+cadena+" Model: "+modelName,month,day)
+                                conexionBitacora.event("SMP-002","Command received "+comando_completo+" Model: "+modelName,month,day)
                                 conexionBitacora.event("CMD-F001","Command,FAILED",month,day)
                                 green_label.configure(image=image_green)
                                 red_label.configure(image=image_red_full)
                             else:
                                 modelName = modelName[1]
                                 model_name.set(modelName)
-                                safe_insert("Command received-> "+cadena+"\n"+"Command SELECT MODEL PASSED"+"\n")
+                                safe_insert("Command received-> "+comando_completo+"\n"+"Command SELECT MODEL PASSED"+"\n")
                                 try:
                                     conn.send("PASSED".encode('UTF-8'))
                                 except Exception as e:
                                     safe_insert(f"Error enviando: {e}", "red")
-                                conexionBitacora.event("SMP-001","Command received "+cadena,month,day)
+                                conexionBitacora.event("SMP-001","Command received "+comando_completo,month,day)
                                 conexionBitacora.event("CMD-P001","Command,PASSED",month,day)
                                 green_label.configure(image=image_green_full)
                                 red_label.configure(image=image_red)
                         else:
-                            safe_insert("Command received-> "+cadena+"\n"+"Command FAILED"+"\n", "red")
+                            safe_insert("Command received-> "+comando_completo+"\n"+"Command FAILED"+"\n", "red")
                             try:
                                 conn.send("FAILED".encode('UTF-8'))
                             except Exception as e:
                                 safe_insert(f"Error enviando: {e}", "red")
-                            conexionBitacora.event("SMP-002","Command received "+cadena,month,day)
+                            conexionBitacora.event("SMP-002","Command received "+comando_completo,month,day)
                             conexionBitacora.event("CMD-F001","Command,FAILED",month,day)
                             green_label.configure(image=image_green)
                             red_label.configure(image=image_red_full)
@@ -2576,205 +1783,63 @@ def worker(conn, addr):
                         pieza = ""
 
                     case "commit":
+                        cadena = ""
+                        # clear_table_data()
+                        for item in option:
+                            cadena += str(item) + ","
+                        # print(cadena)
+                        logging.info(f"Commit received: {cadena}")
+                        elementos = cadena.split(',')
+                        cadena = ','.join(elementos[:-2] + [elementos[-1]])
 
-                        cadena_original = comando_completo.strip()
-                        cadena_limpia = cadena_original.rstrip(",")
+                        entry_piece.configure(state="readonly", textvariable=piece_name)
+                        piece_name.set(option[-2])
+                        
+                        if option[-1] == '1/':
+                            part_name = entry_piece.get()
+                            commit_options, table_data = commands.commit(cadena, option[-2])
+                        
+                            if(commit_options == 'PASSED'):
+                                if table_data:
+                                    update_table_with_data(table_data)
 
-                        print(f"[DEBUG COMMIT RAW] {repr(cadena_original)}")
-                        logging.info(f"[DEBUG COMMIT RAW] {repr(cadena_original)}")
-                        logging.info(f"[DEBUG COMMIT OPTION] len={len(option)} option={option}")
+                                safe_insert("Command received-> "+comando_completo+"\n"+"Command COMMIT PASSED"+"\n")
+                                try:
+                                    conn.send("PASSED".encode('UTF-8'))
+                                except Exception as e:
+                                    safe_insert(f"Error enviando: {e}", "red")
+                                    
+                                conexionBitacora.event("COM-001","|Command received| "+comando_completo,month,day)
+                                conexionBitacora.event("CMD-P001","|Command,PASSED|",month,day)
 
-                        if len(option) >= 2 and option[-1].strip() == '1/':
-                            part_name = SERIAL_PADRE_GLOBAL.strip() if SERIAL_PADRE_GLOBAL else entry_piece.get().strip()
-
-                            if not part_name:
-                                safe_insert(
-                                    "Command received-> " + cadena_original + "\n" +
-                                    ": The part has not been loaded" + "\n" +
-                                    "Command FAILED" + "\n",
-                                    "red"
-                                )
-
+                                green_label.configure(image=image_green_full)
+                                red_label.configure(image=image_red)
+                            else:
+                                safe_insert("Command received-> "+comando_completo+"\n"+"Command FAILED"+"\n", "red")
                                 try:
                                     conn.send("FAILED".encode('UTF-8'))
                                 except Exception as e:
                                     safe_insert(f"Error enviando: {e}", "red")
 
-                                conexionBitacora.event(
-                                    "CMD-C001",
-                                    "Command received " + cadena_original + ": The part has not been loaded",
-                                    month,
-                                    day
-                                )
-                                conexionBitacora.event("CMD-F001", "Command,FAILED", month, day)
+                                conexionBitacora.event("COM-002","|Command received| "+comando_completo,month,day)
+                                conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
 
                                 green_label.configure(image=image_green)
                                 red_label.configure(image=image_red_full)
-
-                            else:
-                                try:
-                                    cadena_para_commit = cadena_limpia
-                                    es_screwing = len(option) > 1 and str(option[1]).strip() == "Screwing"
-
-                                    if es_screwing:
-                                        cadena_para_commit = normalizar_commit_screwing_st60(cadena_limpia)
-
-                                    print(f"[DEBUG COMMIT FINAL] {repr(cadena_para_commit)}")
-                                    print(f"[DEBUG COMMIT LEN] {len(cadena_para_commit.split(','))}")
-
-                                    print("\n========== DEBUG ANTES DE COMMIT ==========")
-                                    print(f"SERIAL_PADRE_GLOBAL: {SERIAL_PADRE_GLOBAL}")
-                                    print(f"entry_piece.get(): {entry_piece.get()}")
-                                    print(f"part_name usado para guardar: {part_name}")
-                                    print(f"cadena_para_commit: {cadena_para_commit}")
-                                    print("==========================================\n")
-
-                                    ultimo_id_antes_commit = 0
-                                    if es_screwing:
-                                        try:
-                                            if hasattr(conexion, "obtener_ultimo_id_screwing"):
-                                                ultimo_id_antes_commit = conexion.obtener_ultimo_id_screwing(part_name)
-
-                                            print(f"[DEBUG COMMIT DB] Último ID antes del commit: {ultimo_id_antes_commit}")
-
-                                        except Exception as e:
-                                            print(f"[DEBUG COMMIT DB WARNING] No se pudo obtener último ID antes: {e}")
-                                            ultimo_id_antes_commit = 0
-
-                                    commit_options, table_data = commands.commit(cadena_para_commit, part_name)
-
-                                    commit_screwing_failed = False
-                                    screwing_insertado_en_commit = False
-                                    debug_screwing = []
-
-                                    if es_screwing:
-                                        commit_screwing_failed = commit_screwing_tiene_falla(cadena_para_commit)
-
-                                        try:
-                                            ultimo_id_despues_commit = 0
-
-                                            if hasattr(conexion, "obtener_ultimo_id_screwing"):
-                                                ultimo_id_despues_commit = conexion.obtener_ultimo_id_screwing(part_name)
-                                                screwing_insertado_en_commit = ultimo_id_despues_commit > ultimo_id_antes_commit
-
-                                            debug_screwing = conexion.screwing_current_state(
-                                                part_name,
-                                                START_SCREWING_ID_GLOBAL
-                                            )
-
-                                            print(f"[DEBUG COMMIT DB] Último ID después del commit: {ultimo_id_despues_commit}")
-                                            print(f"[DEBUG COMMIT DB] Insertado en este commit: {screwing_insertado_en_commit}")
-                                            print(f"[DEBUG COMMIT DB] Mediciones guardadas para {part_name}: {len(debug_screwing)}")
-
-                                            if not debug_screwing:
-                                                print("[DEBUG COMMIT DB] commands.commit regresó:")
-                                                print(f"commit_options = {commit_options}")
-                                                print(f"table_data = {table_data}")
-
-                                        except Exception as e:
-                                            print(f"[DEBUG COMMIT DB ERROR] {e}")
-                                            logging.error(f"[DEBUG COMMIT DB ERROR] {e}")
-
-                                    if es_screwing:
-                                        commit_procesado_ok = (commit_options == 'PASSED') or screwing_insertado_en_commit
-                                    else:
-                                        commit_procesado_ok = (commit_options == 'PASSED')
-
-                                    if commit_procesado_ok:
-                                        if table_data:
-                                            if es_screwing:
-                                                table_data = filtrar_table_data_screwing(
-                                                    table_data,
-                                                    cadena_para_commit
-                                                )
-
-                                            update_table_with_data(table_data)
-
-                                        mensaje_commit = (
-                                            "Command received-> " + cadena_original + "\n" +
-                                            "Command COMMIT PASSED" + "\n"
-                                        )
-
-                                        if es_screwing and commit_screwing_failed:
-                                            mensaje_commit += "Screwing measurement FAILED" + "\n"
-
-                                        safe_insert(mensaje_commit)
-
-                                        try:
-                                            conn.send("PASSED".encode('UTF-8'))
-                                        except Exception as e:
-                                            safe_insert(f"Error enviando: {e}", "red")
-
-                                        conexionBitacora.event("COM-001", "Command received " + cadena_original, month, day)
-                                        conexionBitacora.event("CMD-P001", "Command,PASSED", month, day)
-
-                                        if es_screwing and commit_screwing_failed:
-                                            conexionBitacora.event("SCR-F001", "Screwing measurement FAILED", month, day)
-
-                                        green_label.configure(image=image_green_full)
-                                        red_label.configure(image=image_red)
-
-                                    else:
-                                        safe_insert(
-                                            "Command received-> " + cadena_original + "\n" +
-                                            "Command FAILED" + "\n",
-                                            "red"
-                                        )
-
-                                        try:
-                                            conn.send("FAILED".encode('UTF-8'))
-                                        except Exception as e:
-                                            safe_insert(f"Error enviando: {e}", "red")
-
-                                        conexionBitacora.event("COM-002", "Command received " + cadena_original, month, day)
-                                        conexionBitacora.event("CMD-F001", "Command,FAILED", month, day)
-
-                                        green_label.configure(image=image_green)
-                                        red_label.configure(image=image_red_full)
-
-                                except Exception as e:
-                                    safe_insert(
-                                        "Command received-> " + cadena_original + "\n" +
-                                        "Command FAILED\n" +
-                                        f"Commit internal error: {e}\n",
-                                        "red"
-                                    )
-
-                                    logging.error(f"[COMMIT INTERNAL ERROR] {e}")
-                                    logging.error(f"[COMMIT RAW] {repr(cadena_original)}")
-                                    logging.error(f"[COMMIT OPTION] {option}")
-
-                                    try:
-                                        conn.send("FAILED".encode('UTF-8'))
-                                    except Exception as send_error:
-                                        safe_insert(f"Error enviando: {send_error}", "red")
-
-                                    conexionBitacora.event("COM-002", "Command received " + cadena_original, month, day)
-                                    conexionBitacora.event("CMD-F001", "Command,FAILED", month, day)
-
-                                    green_label.configure(image=image_green)
-                                    red_label.configure(image=image_red_full)
-
                         else:
-                            safe_insert(
-                                "Command received-> " + cadena_original + "\n" +
-                                "Command FAILED" + "\n" +
-                                f"Invalid commit format. option={option}\n",
-                                "red"
-                            )
-
+                            safe_insert("Command received-> "+comando_completo+"\n"+"Command FAILED"+"\n", "red")
                             try:
                                 conn.send("FAILED".encode('UTF-8'))
                             except Exception as e:
                                 safe_insert(f"Error enviando: {e}", "red")
 
-                            conexionBitacora.event("COM-002", "Command received " + cadena_original, month, day)
-                            conexionBitacora.event("CMD-F001", "Command,FAILED", month, day)
-
+                            conexionBitacora.event("COM-002","|Command received| "+comando_completo,month,day)
+                            conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
                             green_label.configure(image=image_green)
                             red_label.configure(image=image_red_full)
-
+                        cadena = ""
                         pieza = ""
+                    
                     case "Component":
                         pieza_padre = piece_name.get()
                         entry_piece.focus_set()
@@ -2819,8 +1884,8 @@ def worker(conn, addr):
                                             safe_insert("Error storing component in database, verify the string", "red")
                                             logging.error("Error storing component in database")
                                             break
-                                        safe_insert("Command received-> "+cadena+" actuator: "+name_piece+"\n"+"Command COMPONENT PASSED"+"\n")
-                                        conexionBitacora.event("SPP-001","Command received "+cadena+" actuator: "+name_piece,month,day)
+                                        safe_insert("Command received-> "+comando_completo+" actuator: "+name_piece+"\n"+"Command COMPONENT PASSED"+"\n")
+                                        conexionBitacora.event("SPP-001","Command received "+comando_completo+" actuator: "+name_piece,month,day)
                                         conexionBitacora.event("CMD-P001","Command,PASSED",month,day)
                                         green_label.configure(image=image_green_full)
                                         red_label.configure(image=image_red)
@@ -2841,7 +1906,7 @@ def worker(conn, addr):
                                                     conn.send("RESET".encode('UTF-8'))
                                                 except Exception as e:
                                                     safe_insert(f"Error enviando: {e}", "red")
-                                                safe_insert("Command received-> "+cadena+" RESET PROCESS-> Command: "+reset+"\n"+"Command COMPONENT PASSED")
+                                                safe_insert("Command received-> "+comando_completo+" RESET PROCESS-> Command: "+reset+"\n"+"Command COMPONENT PASSED")
                                                 conexionBitacora.event("RP-002","Command received "+reset,month,day)
                                                 conexionBitacora.event("CMD-F001","Command,FAILED",month,day)
                                                 green_label.configure(image=image_green_full)
@@ -2876,8 +1941,8 @@ def worker(conn, addr):
                                     safe_insert("Error storing component in database, verify the string", "red")
                                     logging.error("Error storing component in database")
                                     break
-                                safe_insert("Command received-> "+cadena+" actuator: "+name_piece+"\n"+"Command COMPONENT PASSED")
-                                conexionBitacora.event("SPP-001","Command received "+cadena+" actuator: "+name_piece,month,day)
+                                safe_insert("Command received-> "+comando_completo+" actuator: "+name_piece+"\n"+"Command COMPONENT PASSED")
+                                conexionBitacora.event("SPP-001","Command received "+comando_completo+" actuator: "+name_piece,month,day)
                                 conexionBitacora.event("CMD-P001","Command,PASSED",month,day)
                                 green_label.configure(image=image_green_full)
                                 red_label.configure(image=image_red)
@@ -2888,21 +1953,21 @@ def worker(conn, addr):
                                 conn.settimeout(None)
                                 entry_piece.configure(state="readonly", textvariable=piece_name)
                                 piece_name.set("")
-                                safe_insert("Command received-> "+cadena+" part: "+name_piece+"\n"+"Command FAILED")
+                                safe_insert("Command received-> "+comando_completo+" part: "+name_piece+"\n"+"Command FAILED")
                                 try:
                                     conn.send("FAILED".encode('UTF-8'))
                                     conn.send("verify data".encode('UTF-8'))
                                 except Exception as e:
                                     safe_insert(f"Error enviando: {e}", "red")
-                                conexionBitacora.event("SPP-002","Command received "+cadena+" part: "+name_piece,month,day)
+                                conexionBitacora.event("SPP-002","Command received "+comando_completo+" part: "+name_piece,month,day)
                                 conexionBitacora.event("CMD-F001","Command,FAILED",month,day)
                                 green_label.configure(image=image_green)
                                 red_label.configure(image=image_red_full)
                                 break
                         else:
                             conn.send("FAILED".encode('UTF-8'))
-                            safe_insert("Command received-> "+cadena+"\n"+"Command FAILED", "red")
-                            conexionBitacora.event("SPP-002","Command received "+cadena,month,day)
+                            safe_insert("Command received-> "+comando_completo+"\n"+"Command FAILED", "red")
+                            conexionBitacora.event("SPP-002","Command received "+comando_completo,month,day)
                             conexionBitacora.event("CMD-F001","Command,FAILED",month,day)
                             green_label.configure(image=image_green)
                             red_label.configure(image=image_red_full)
@@ -2912,18 +1977,18 @@ def worker(conn, addr):
                         serial = conexion.get_part_numbers('P2173404-00-C:SEYU26061A0765')
                         if serial != "PASSED":
                             conn.send(f"{serial}".encode('UTF-8'))
-                            safe_insert(f"Command received-> {cadena} part: {serial}\nCommand PASSED\nPrinting...\n", "green")
+                            safe_insert(f"Command received-> {comando_completo} part: {serial}\nCommand PASSED\nPrinting...\n", "green")
                         else:
                             conn.send("do_not_print".encode('UTF-8'))
-                            safe_insert(f"Command received-> {cadena} part: {serial}\nCommand PASSED\nDon't print\n", "orange")
+                            safe_insert(f"Command received-> {comando_completo} part: {serial}\nCommand PASSED\nDon't print\n", "orange")
 
                     case _:
-                        safe_insert("Command received-> "+cadena+"\n"+"Command FAILED"+"\n", "red")
+                        safe_insert("Command received-> "+comando_completo+"\n"+"Command FAILED"+"\n", "red")
                         try:
                             conn.send("FAILED".encode('UTF-8'))
                         except Exception as e:
                             safe_insert(f"Error enviando: {e}", "red")
-                        conexionBitacora.event("COM-002","Command received "+cadena,month,day)
+                        conexionBitacora.event("COM-002","Command received "+comando_completo,month,day)
                         conexionBitacora.event("CMD-F001","Command,FAILED",month,day)
                         green_label.configure(image=image_green)
                         red_label.configure(image=image_red_full)

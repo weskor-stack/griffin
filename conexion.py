@@ -54,7 +54,6 @@ class DatabaseManager:
             cursor.close()
             
             logging.info("✅ Conexión a BD establecida correctamente")
-            print("✅ Conexión a BD establecida correctamente")
             
         except mariadb.Error as e:
             logging.error(f"❌ Error conectando a BD: {e}")
@@ -634,7 +633,7 @@ def parameters_screwing(element, name_piece):
             return "FAILED"
         value, low_limit, high_limit, data_type, units, result, metadata = element[1:8]
         compoperator = evaluation.evaluation(element[1:4])
-        description = f"{measurement[1]}_{element[8]}"
+        description = f"{measurement[1]}_Screwing_{element[8]}"
         screwing_measurement_id = measurement[0]
         station_id = station[0]
         part_id = part[0]
@@ -1323,7 +1322,8 @@ def weight_data(part_id):
                     description
                 FROM weight
                 WHERE part_id = %s
-                ORDER BY weight_id ASC
+                ORDER BY weight_id desc
+                LIMIT 1
             ''', (part_id,))
             # print(cursor.fetchall())
             return cursor.fetchall()
@@ -3808,6 +3808,266 @@ def obtener_parte2(serial_number):
         print("[ERROR] No se encontraron atributos.")
         return []
 ############################################################################################################################################
+
+def screwing_current_state(serial_padre, desde_id=0):
+    """
+    Recupera el estado actual de Screwing para el ciclo ST60 actual.
+
+    Reglas:
+    - Solo toma registros posteriores al START actual usando desde_id.
+    - Si un tornillo tuvo varios reintentos, toma solo el último registro
+      por description + screwing_measurement_id.
+    - Evita traer historial viejo de la misma pieza/serial.
+
+    Retorna ps.* + sm.key + sm.name.
+    Por eso traceability_json.py puede leer:
+    row[-2] = key técnica, ejemplo T, A, PX, PY
+    row[-1] = nombre, ejemplo Torque, Angles, Position X
+    """
+    try:
+        serial_padre = str(serial_padre).strip()
+
+        try:
+            desde_id = int(desde_id or 0)
+        except Exception:
+            desde_id = 0
+
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        cursor.execute(
+            """
+            SELECT part_id
+            FROM part
+            WHERE part_number = ?
+            ORDER BY
+                CASE WHEN status_id = 3 THEN 0 ELSE 1 END,
+                part_id DESC
+            LIMIT 1
+            """,
+            (serial_padre,)
+        )
+        part = cursor.fetchone()
+
+        if not part:
+            print(f"[SCREWING CURRENT STATE] No se encontró part para serial: {serial_padre}")
+            cursor.close()
+            conn_local.close()
+            return []
+
+        part_id = part[0]
+
+        sql = """
+            SELECT
+                ps.*,
+                sm.key AS measurement_key,
+                sm.name AS measurement_type
+            FROM parameters_screwing ps
+            INNER JOIN screwing_measurement sm
+                ON sm.screwing_measurement_id = ps.screwing_measurement_id
+            INNER JOIN (
+                SELECT
+                    description,
+                    screwing_measurement_id,
+                    MAX(parameters_screwing_id) AS ultimo_id
+                FROM parameters_screwing
+                WHERE part_id = ?
+                  AND parameters_screwing_id > ?
+                GROUP BY description, screwing_measurement_id
+            ) ult
+                ON ps.parameters_screwing_id = ult.ultimo_id
+            WHERE ps.part_id = ?
+              AND ps.parameters_screwing_id > ?
+            ORDER BY ps.parameters_screwing_id ASC
+        """
+        cursor.execute(sql, (part_id, desde_id, part_id, desde_id))
+        rows = cursor.fetchall()
+
+        cursor.close()
+        conn_local.close()
+
+        print(
+            f"[SCREWING CURRENT STATE] serial={serial_padre} "
+            f"part_id={part_id} desde_id={desde_id} registros={len(rows)}"
+        )
+
+        return rows
+
+    except Exception as e:
+        print(f"[ERROR] screwing_current_state(): {e}")
+        return []
+
+############################################################################################################################################
+
+def obtener_ultimo_id_screwing(serial_padre):
+    """
+    Devuelve el último parameters_screwing_id existente para este serial
+    justo antes de iniciar el ciclo actual.
+
+    Se usa para evitar que ST60 tome mediciones viejas de la misma pieza/serial
+    cuando se hacen pruebas repetidas o reprocesos.
+    """
+    try:
+        serial_padre = str(serial_padre).strip()
+
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        cursor.execute(
+            """
+            SELECT part_id
+            FROM part
+            WHERE part_number = ?
+            ORDER BY
+                CASE WHEN status_id = 3 THEN 0 ELSE 1 END,
+                part_id DESC
+            LIMIT 1
+            """,
+            (serial_padre,)
+        )
+        part = cursor.fetchone()
+
+        if not part:
+            cursor.close()
+            conn_local.close()
+            return 0
+
+        part_id = part[0]
+
+        cursor.execute(
+            """
+            SELECT COALESCE(MAX(parameters_screwing_id), 0)
+            FROM parameters_screwing
+            WHERE part_id = ?
+            """,
+            (part_id,)
+        )
+        row = cursor.fetchone()
+
+        cursor.close()
+        conn_local.close()
+
+        return int(row[0]) if row and row[0] is not None else 0
+
+    except Exception as e:
+        print(f"[ERROR] obtener_ultimo_id_screwing(): {e}")
+        return 0
+
+############################################################################################################################################
+
+def _get_last_records(table, part_id, columns, id_column, status_column='status_id'):
+    """
+    Helper para obtener registros con filtro por reintentos.
+    
+    Regla de negocio (por cada description):
+    1. Si el último registro es PASS → mostrar SOLO el PASS
+    2. Si el último registro es FAIL → mostrar SOLO el FAIL con más reintentos
+    """
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                # Construir cláusulas de filtro
+                # if status_column:
+                #     status_filter = f"AND t.{status_column} = 1"
+                #     status_filter_sub = f"AND {status_column} = 1"
+                # else:
+                status_filter = ""
+                status_filter_sub = ""
+                
+                select_clause = columns if columns and columns != '*' else 't.*'
+                
+                sql = f'''
+                    SELECT {select_clause}
+                    FROM {table} t
+                    WHERE t.part_id = %s
+                    {status_filter}
+                    AND (
+                        -- Caso 1: Último registro de esta description es PASS
+                        -- → mostrar SOLO el PASS
+                        (
+                            t.result = 'PASSED'
+                            AND NOT EXISTS (
+                                SELECT 1 
+                                FROM {table} u
+                                WHERE u.description = t.description
+                                AND u.part_id = %s
+                                {status_filter_sub.replace('t.', 'u.') if status_column else ''}
+                                AND u.{id_column} > t.{id_column}
+                            )
+                        )
+                        
+                        -- Caso 2: Último registro de esta description es FAIL
+                        -- → mostrar SOLO el FAILED con MAX reintentos
+                        OR (
+                            t.result = 'FAILED'
+                            -- Es el FAILED con el máximo reintento para esta description
+                            AND t.metadata = (
+                                SELECT MAX(metadata)
+                                FROM {table} f
+                                WHERE f.description = t.description
+                                AND f.part_id = %s
+                                {status_filter_sub}
+                                AND f.result = 'FAILED'
+                                AND f.metadata IS NOT NULL
+                                AND f.metadata >= 0
+                            )
+                            -- Verificar que NO hay PASS posterior
+                            AND NOT EXISTS (
+                                SELECT 1 
+                                FROM {table} u
+                                WHERE u.description = t.description
+                                AND u.part_id = %s
+                                {status_filter_sub.replace('t.', 'u.') if status_column else ''}
+                                AND u.result = 'PASSED'
+                                AND u.{id_column} > t.{id_column}
+                            )
+                            -- Verificar que es el FAILED más RECIENTE con ese reintento
+                            AND NOT EXISTS (
+                                SELECT 1 
+                                FROM {table} u2
+                                WHERE u2.description = t.description
+                                AND u2.part_id = %s
+                                {status_filter_sub.replace('t.', 'u2.') if status_column else ''}
+                                AND u2.result = 'FAILED'
+                                AND u2.metadata = t.metadata
+                                AND u2.{id_column} > t.{id_column}
+                            )
+                        )
+                    )
+                    ORDER BY t.description, t.{id_column}
+                '''
+
+                cursor.execute(sql, (part_id, part_id, part_id, part_id, part_id))
+                results = cursor.fetchall()
+                logging.info(f"✅ _get_last_records para {table}: {len(results)} registros encontrados")
+                return results
+                
+    except Exception as e:
+        logging.error(f"❌ Error en _get_last_records para {table}: {e}")
+        return []
+
+def inspection_data_st60(part_id):
+    """Obtiene datos de inspección"""
+    return _get_last_records('parameters_inspection', part_id, '*', 'parameters_inspection_id', 'status_id')
+
+def screwing_data_st60(part_id):
+    """Obtiene datos de screwing"""
+    return _get_last_records('parameters_screwing', part_id, '*', 'parameters_screwing_id', 'status_id')
+
+def pressfit_data_st60(part_id):
+    """Obtiene datos de pressfit"""
+    return _get_last_records('parameters_pressfit', part_id, '*', 'parameters_pressfit_id', None)
+
+def continuity_data_st60(part_id):
+    """Obtiene datos de continuidad"""
+    return _get_last_records('parameters_continuty', part_id, '*', 'parameters_continuity_id', 'status_status_id')
+
+def electrical_data_st60(part_id):
+    """Obtiene datos eléctricos"""
+    return _get_last_records('parameters_electrical', part_id, '*', 'parameters_electrical_id', 'status_id')
+
+############################################################################################################################################
+
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
 # parameters_electrical(['Ct', '50', '10', '100', 'Numeric', 'N', 'OK', 'Comentarios'],name)

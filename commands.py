@@ -150,118 +150,83 @@ def commit(cadena, name_piece):
             else:
                 return "FAILED", []
         case "Screwing":
-            # print(options)
-            # print(len(options))
-            # print(options[-4])
-            if len(options) == 38:
+            print(options[-1])
+            if len(options) == 37:
                 torque = options[2:10]
+                print(torque)
                 angle = options[10:18]
                 px = options[18:26]
-                py = options[26:-4]
+                py = options[26:-2]
 
                 result_torque = ""
                 result_angle = ""
                 result_spx = ""
                 result_spy = ""
 
-                torque.append(options[-4])
-                angle.append(options[-4])
-                px.append(options[-4])
-                py.append(options[-4])
+                torque.append(options[-3])
+                angle.append(options[-3])
+                px.append(options[-3])
+                # px.append("Pull_test")
+                py.append(options[-3])
                 # print(torque)
                 # print(angle)
                 # print(px)
                 # print(py)
-
-                def result_visual(bloque):
-                    result_raw = str(bloque[6]).strip().upper()
-
-                    try:
-                        value_float = float(bloque[1])
-                        low_float = float(bloque[2])
-                        high_float = float(bloque[3])
-
-                        if result_raw in ["FAILED", "FAIL", "NOK"]:
-                            return "FAIL"
-
-                        if value_float < low_float or value_float > high_float:
-                            return "FAIL"
-
-                        return "PASS"
-
-                    except Exception:
-                        if result_raw in ["FAILED", "FAIL", "NOK"]:
-                            return "FAIL"
-
-                        return "PASS"
-
-                result_torque = result_visual(torque)
-                result_angle = result_visual(angle)
-                result_spx = result_visual(px)
-                result_spy = result_visual(py)
+                
 
                 if torque[0] == 'T' and angle[0] == 'A' and px[0] == 'PX' and py[0] == 'PY':
-                    torque_measurement = conexion.parameters_screwing(torque, options[-3])
-                    if torque_measurement != 'GENERAL_ERROR' and torque_measurement != 'FAILED':
+                    torque_measurement = conexion.parameters_screwing(torque,name_piece)
+                    if torque_measurement != 'GENERAL_ERROR':
                         data_for_table.append([
-                            torque[0],  # Measurement
+                            "Torque",  # Measurement
                             torque[1],  # Value
                             torque[2],  # Lower limit
                             torque[3],  # Upper limit
                             torque[4],  # Type
                             torque[5],  # Unit
-                            result_torque
+                            torque[6]   # Result
                         ])
-                    elif torque_measurement == 'FAILED':
-                        return "FAILED", []
-
-                    angle_measurement = conexion.parameters_screwing(angle, options[-3])
-                    if angle_measurement != 'GENERAL_ERROR' and angle_measurement != 'FAILED':
+                    angle_measurement = conexion.parameters_screwing(angle,name_piece)
+                    if angle_measurement != 'GENERAL_ERROR':
                         data_for_table.append([
-                            angle[0],  # Measurement
+                            "Angle",  # Measurement
                             angle[1],  # Value
                             angle[2],  # Lower limit
                             angle[3],  # Upper limit
                             angle[4],  # Type
                             angle[5],  # Unit
-                            result_angle
+                            angle[6]   # Result
                         ])
-                    elif angle_measurement == 'FAILED':
-                        return "FAILED", []
-
-                    px_measurement = conexion.parameters_screwing(px, options[-3])
-                    if px_measurement != 'GENERAL_ERROR' and px_measurement != 'FAILED':
+                    px_measurement = conexion.parameters_screwing(px,name_piece)
+                    if px_measurement != 'GENERAL_ERROR':
                         data_for_table.append([
-                            px[0],  # Measurement
+                            "Rundown Angle",  # Measurement
                             px[1],  # Value
                             px[2],  # Lower limit
                             px[3],  # Upper limit
                             px[4],  # Type
                             px[5],  # Unit
-                            result_spx
+                            px[6]   # Result
                         ])
-                    elif px_measurement == 'FAILED':
-                        return "FAILED", []
-
-                    py_measurement = conexion.parameters_screwing(py, options[-3])
-                    if py_measurement != 'GENERAL_ERROR' and py_measurement != 'FAILED':
+                    py_measurement = conexion.parameters_screwing(py,name_piece)
+                    if py_measurement != 'GENERAL_ERROR':
                         data_for_table.append([
-                            py[0],  # Measurement
+                            "Position y",  # Measurement
                             py[1],  # Value
                             py[2],  # Lower limit
                             py[3],  # Upper limit
                             py[4],  # Type
                             py[5],  # Unit
-                            result_spy
+                            py[6]   # Result
                         ])
-                    elif py_measurement == 'FAILED':
-                        return "FAILED", []
 
                     return "PASSED", data_for_table
                 else:
                     return "FAILED", []
             else:
                 return "FAILED", []
+        
+
         case "Inspection":
             # station = conexion.stations()
             result_m = ""

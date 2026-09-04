@@ -151,6 +151,107 @@ def conduit_st60(
         ]
     }
 
+def conduit_st60_v2(serial_number, conduit_status):
+    configurador     = conexion.configurador_st60()
 
+    process_name    = configurador[2]          # process_name
+    client_id       = configurador[3]          # client_id
+    operator_id     = configurador[4]          # operator_id
 
-# conduit_st40("P1135558-04-A:SANN26097000001")
+    commands = []
+
+    if conduit_status == 1:
+        commands.append({
+            "name": "AddMeasurementKey"
+        })
+    
+    conduit_json = {
+        "version":      "1.0",
+        "keep_alive":   False,
+        "refresh_unit": True,
+        "source": {
+            "workstation": {
+                "station": process_name,
+                "type":    "Process"
+            },
+            "client_id": client_id,
+            "employee":  operator_id,
+            "password":  ""
+        },
+        "transactions": [
+            {
+                "unit": {
+                    "unit_id": serial_number
+                },
+                "commands": commands
+            }
+        ]
+    }
+    # print(json.dumps(conduit_json, indent=4))
+    return conduit_json
+
+def conduit_st60_v3(serial_number, conduit_status, defect_code):
+    configurador     = conexion.configurador_st60()
+
+    process_name    = configurador[2]          # process_name
+    client_id       = configurador[3]          # client_id
+    operator_id     = configurador[4]          # operator_id
+    program_version = configurador[0]          # program_version
+    machine_id      = configurador[1]          # machine_id
+
+    commands = []
+
+    if conduit_status == 1:
+        commands.append({
+            "name": "AddMeasurementKey"
+        })
+    elif conduit_status == 2:
+        commands.append({
+            "name": "RecordDefect",
+            "defect_code": defect_code
+        })
+    elif conduit_status == 3:
+        commands.append({
+            "name": "RepairAllDefects"
+        })
+    elif conduit_status == 4:
+        commands.extend([{
+            "name": "ReplaceNontrackedComponent",
+            "ref_designator": process_name + "_Program_Name_Version",
+            "component_id": program_version
+        },
+        {
+            "name": "ReplaceNontrackedComponent",
+            "ref_designator": process_name + "_Machine_ID",
+            "component_id": machine_id
+        },
+        {
+            "name": "End"
+        }])
+    
+    conduit_json = {
+        "version":      "1.0",
+        "keep_alive":   False,
+        "refresh_unit": True,
+        "source": {
+            "workstation": {
+                "station": process_name,
+                "type":    "Process"
+            },
+            "client_id": client_id,
+            "employee":  operator_id,
+            "password":  ""
+        },
+        "transactions": [
+            {
+                "unit": {
+                    "unit_id": serial_number
+                },
+                "commands": commands
+            }
+        ]
+    }
+    # print(json.dumps(conduit_json, indent=4))
+    return conduit_json
+
+# conduit_st60_v2("P1135558-04-A:SANN26097000001",2,"DEFECTO-PRUEBA")
