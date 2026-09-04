@@ -1177,7 +1177,7 @@ def worker(conn, addr):
 
                         name_piece = option[-2]
                         if len(option) == 6 and option[-1] == '1/':
-                            duration = "PASSED"#conexion.duration(cadena,option[4])
+                            duration = conexion.duration(cadena,option[4])
 
                             if duration == "PASSED":
                                 # entry_piece.configure(state="readonly", textvariable=piece_name)
@@ -1322,6 +1322,7 @@ def worker(conn, addr):
                                             
                                                 logging.info(f"[CONDUIT RESPONSE]:\n{json.dumps(data_conduit_end, indent=4, ensure_ascii=False)}")
 
+                                            cambio_status = conexion.cambio_status(name_piece)
                                             pantalla_final = (
                                                 f"Command received-> {comando_completo}\nCommand PASSED\n"
                                                 f"[TRACEABILITY JSON]:\n{json.dumps(payload_traceability, indent=4, ensure_ascii=False)}"
@@ -1414,6 +1415,8 @@ def worker(conn, addr):
                                             data_conduit_end = data_conduit_end[0] if len(data_conduit_end) > 0 else {}
                                         
                                             logging.info(f"[CONDUIT RESPONSE]:\n{json.dumps(data_conduit_end, indent=4, ensure_ascii=False)}")
+
+                                        cambio_status = conexion.cambio_status(name_piece)
 
                                         pantalla_final = (
                                             f"Command received-> {comando_completo}\nCommand PASSED\n"
@@ -1509,6 +1512,8 @@ def worker(conn, addr):
                                         
                                             logging.info(f"[CONDUIT RESPONSE]:\n{json.dumps(data_conduit_end, indent=4, ensure_ascii=False)}")
 
+                                        cambio_status = conexion.cambio_status(name_piece)
+
                                         pantalla_final = (
                                             f"Command received-> {comando_completo}\nCommand PASSED\n"
                                             f"[TRACEABILITY JSON]:\n{json.dumps(payload_traceability, indent=4, ensure_ascii=False)}"
@@ -1553,6 +1558,8 @@ def worker(conn, addr):
                                         
                                             logging.info(f"[CONDUIT RESPONSE]:\n{json.dumps(data_conduit_end, indent=4, ensure_ascii=False)}")
 
+                                        cambio_status = conexion.cambio_status(name_piece)
+                                        
                                         pantalla_final = (
                                             f"Command received-> {comando_completo}\nCommand PASSED\n"
                                             f"[TRACEABILITY JSON]:\n{json.dumps(payload_traceability, indent=4, ensure_ascii=False)}"

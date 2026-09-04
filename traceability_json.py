@@ -1329,11 +1329,11 @@ def traceability_station_60(serial_padre, defect_code_default=""):
                 'name': attr[1]
             }
 
-    part_row = conexion.pieces(serial_padre)
+    part_row = part_id
     all_test_rows = []
     
     if part_row:
-        part_id = part_row[0]
+        # part_id = part_row[0]
         
         try:
             sr = conexion.screwing_data_st60(part_id)

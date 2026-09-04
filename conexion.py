@@ -977,17 +977,17 @@ def duration(element, name_piece):
             cursor.execute(sql, val)
             conn.commit()
 
-        # Desactivar piezas anteriores
-        cursor = conn.cursor()
-        cursor.execute("UPDATE part SET status_id = ? WHERE status_id = ? AND part_number = ?", (2, 3, name_piece))
-        conn.commit()
-        cursor.close()
+        # # Desactivar piezas anteriores
+        # cursor = conn.cursor()
+        # cursor.execute("UPDATE part SET status_id = ? WHERE status_id = ? AND part_number = ?", (2, 3, name_piece))
+        # conn.commit()
+        # cursor.close()
 
         # Eliminar pieza de la tabla serial_number
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM serial_number WHERE data = ?", (name_piece,))
-        conn.commit()
-        cursor.close()
+        # cursor = conn.cursor()
+        # cursor.execute("DELETE FROM serial_number WHERE data = ?", (name_piece,))
+        # conn.commit()
+        # cursor.close()
 
         # Registrar en historial
         # num_piece = [""] * 13 + [taskresult, tasktimestamp, taskduration, metadata]
@@ -4067,7 +4067,18 @@ def electrical_data_st60(part_id):
     return _get_last_records('parameters_electrical', part_id, '*', 'parameters_electrical_id', 'status_id')
 
 ############################################################################################################################################
-
+def cambio_status(name_piece):
+    try:
+        # Desactivar piezas anteriores
+        cursor = conn.cursor()
+        cursor.execute("UPDATE part SET status_id = ? WHERE status_id = ? AND part_number = ?", (2, 3, name_piece))
+        conn.commit()
+        cursor.close()
+    except Exception as e:
+        print(f"[ERROR] cambio_status(): {e}")
+        return "FAILED"
+    
+############################################################################################################################################
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
 # parameters_electrical(['Ct', '50', '10', '100', 'Numeric', 'N', 'OK', 'Comentarios'],name)
