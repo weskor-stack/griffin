@@ -1164,6 +1164,74 @@ def worker(conn, addr):
                             safe_insert("Verify & Interlocking: SUCCESS", "green")
                         cadena = ""
 
+                    case "reset":
+                        for item in option:
+                            cadena += str(item) + ","
+
+                        clear_table_data()
+                        # part_name = entry_piece.get()
+                        if len(entry_piece.get()) == 30:
+                            part_name = entry_piece.get()
+                            cadena = "reset,RESET,0.0,The station was reestablished,1/"
+                            # print(part_name)
+                            # print(cadena)
+
+                            duration = "PASSED" #conexion.duration(cadena,part_name)
+
+                            if duration == "PASSED":
+                                # entry_piece.configure(state="readonly", textvariable=piece_name)
+                                # piece_name.set("")
+                                safe_insert("Command received-> "+cadena+"\n"+"Command RESET PASSED"+"\n")
+                                logging.info(f"Command received-> {cadena}\n Command RESET PASSED")
+
+                                # file_json = data_json.json_file()
+
+                                # if file_json != "PASSED":
+                                #     # message_connection = messagebox.showwarning(title="Access", message=f"Error: "+file_json)
+                                #     safe_insert("Access denied-> "+file_json+"\n"+"Command FAILED"+"\n")
+                                #     logging.warning(f"Access denied-> {file_json}\n Command FAILED")
+
+                                #     conexionBitacora.event("ENDP-002","|File not created| "+file_json,month,day)
+                                #     conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+
+                                #     green_label.configure(image=image_green)
+                                #     red_label.configure(image=image_red_full)
+                                # else:
+                                conexionBitacora.event("ENDP-001","|Command received| "+cadena,month,day)
+                                conexionBitacora.event("CMD-P001","|Command,PASSED|",month,day)
+                                            
+                                green_label.configure(image=image_green_full)
+                                red_label.configure(image=image_red)
+                            else:
+                                safe_insert("Command received-> "+cadena+"\n"+"Command FAILED"+"\n")
+                                logging.error(f"Command received-> {cadena}\nCommand FAILED")
+
+                                conexionBitacora.event("ENDP-002","|Command received| "+cadena,month,day)
+                                conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+
+                                green_label.configure(image=image_green)
+                                red_label.configure(image=image_red_full)
+                        else:
+                            # print("Nada")
+                            # print(cadena)
+                            # entry_piece.configure(state="readonly", textvariable=piece_name)
+                            # piece_name.set("")
+                            try:
+                                conn.send("RESET".encode('UTF-8'))
+                            except Exception as e:
+                                safe_insert(f"Error enviando: {e}", "red")
+                                logging.error(f"Error enviando: {e}")
+
+                            safe_insert("Command received-> "+cadena+" RESET PROCESS-> Command: reset,1/"+"\n"+"Command RESET PASSED"+"\n")
+                            logging.info(f"Command received-> {cadena} RESET PROCESS-> Command: reset,1/ \n Command RESET PASSED")
+
+                            conexionBitacora.event("RP-002","|Command received| reset,1/",month,day)
+                            conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+
+                            green_label.configure(image=image_green_full)
+                            red_label.configure(image=image_red)
+                        cadena = ""
+                        
                     case "end_process":
                         estado_general = ""
                         for item in option:

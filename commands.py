@@ -153,7 +153,6 @@ def commit(cadena, name_piece):
             print(options[-1])
             if len(options) == 37:
                 torque = options[2:10]
-                print(torque)
                 angle = options[10:18]
                 px = options[18:26]
                 py = options[26:-2]
