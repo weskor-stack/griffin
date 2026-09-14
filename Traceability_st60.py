@@ -1256,7 +1256,7 @@ def worker(conn, addr):
                                 try:
                                     logging.info(f"URL Traceability: {url_traceability}")
 
-                                    payload_traceability = traceability_json.traceability_station_60(option[4],"")
+                                    payload_traceability = traceability_json.traceability_station_60_v2(option[4],"")
                                     defect_code = payload_traceability[1]
                                     payload_traceability = payload_traceability[0]
 
