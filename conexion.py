@@ -4034,7 +4034,7 @@ def _get_last_records(table, part_id, columns, id_column, status_column='status_
                             )
                         )
                     )
-                    ORDER BY t.description, t.{id_column}
+                    ORDER BY t.{id_column}
                 '''
 
                 cursor.execute(sql, (part_id, part_id, part_id, part_id, part_id))
