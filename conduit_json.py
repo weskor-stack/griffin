@@ -206,10 +206,11 @@ def conduit_st60_v3(serial_number, conduit_status, defect_code):
             "name": "AddMeasurementKey"
         })
     elif conduit_status == 2:
-        commands.append({
-            "name": "RecordDefect",
-            "defect_code": defect_code
-        })
+        for row in defect_code:
+            commands.append({
+                "name": "RecordDefect",
+                "defect_code": row
+            })
     elif conduit_status == 3:
         commands.append({
             "name": "RepairAllDefects"
@@ -254,4 +255,4 @@ def conduit_st60_v3(serial_number, conduit_status, defect_code):
     # print(json.dumps(conduit_json, indent=4))
     return conduit_json
 
-# conduit_st60_v2("P1135558-04-A:SANN26097000001",2,"DEFECTO-PRUEBA")
+# conduit_st60_v3("P1472635-61-G:SE4A22172000000",2,["DEFECTO-PRUEBA","OTRO-ERROR"])

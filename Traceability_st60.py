@@ -1076,7 +1076,8 @@ def worker(conn, addr):
                                         f"[PN]: {PART_NUMBER_GLOBAL}  [SERIAL]: {name_piece}"
                                     )
                                     safe_insert(pantalla_final, "green")
-                                    logging.info(f"Command received-> {comando_completo} part: {name_piece} - Command PASSED")
+                                    # logging.info(f"Command received-> {comando_completo} part: {name_piece} - Command PASSED")
+                                    logging.info(pantalla_final)
 
                                     green_label.configure(image=image_green_full)
                                     red_label.configure(image=image_red)
@@ -1087,6 +1088,7 @@ def worker(conn, addr):
                                     entry_piece.configure(state=ctk.NORMAL)
                                     entry_piece.delete(0, ctk.END)
                                     safe_insert("❌ Formato de etiqueta inválido. Debe contener ':'", "red")
+                                    logging.error("❌ Formato de etiqueta inválido. Debe contener ':'")
                                     conn.send("FAILED".encode('UTF-8'))
                                     green_label.configure(image=image_green)
                                     red_label.configure(image=image_red_full)
@@ -1638,6 +1640,7 @@ def worker(conn, addr):
                                         )
                                     ##################################################################################################################
                                 safe_insert(pantalla_final, "green")
+                                logging.info(pantalla_final)
                                 try:
                                     conn.send("PASSED".encode('UTF-8'))
                                     green_label.configure(image=image_green_full)
@@ -1647,6 +1650,7 @@ def worker(conn, addr):
 
                                 except Exception as e:
                                     safe_insert(f"Error enviando: {e}", "red")
+                                    logging.error(f"Error enviando: {e}")
                                     conexionBitacora.event("ENDP-002","|Command received| "+comando_completo + "\n"+str(e),month,day)
                                     conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
                                     green_label.configure(image=image_green)

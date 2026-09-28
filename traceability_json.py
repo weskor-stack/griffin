@@ -1539,6 +1539,7 @@ def traceability_station_60_v2(serial_padre, defect_code_default=""):
     steps_list = []
     global_status = "PASSED"
     codigo_defecto = ""
+    array_codigo_defecto = []
 
     for row in all_test_rows:
         try:
@@ -1692,6 +1693,7 @@ def traceability_station_60_v2(serial_padre, defect_code_default=""):
                     else defect_code_default
                 )
                 codigo_defecto = step_defect
+                array_codigo_defecto.append(codigo_defecto)
 
             elif val_medido > lim_sup:
                 step_defect = (
@@ -1700,6 +1702,7 @@ def traceability_station_60_v2(serial_padre, defect_code_default=""):
                     else defect_code_default
                 )
                 codigo_defecto = step_defect
+                array_codigo_defecto.append(codigo_defecto)
             else:
                 step_defect = (
                     defect_code_high
@@ -1711,6 +1714,7 @@ def traceability_station_60_v2(serial_padre, defect_code_default=""):
                     )
                 )
                 codigo_defecto = step_defect
+                array_codigo_defecto.append(codigo_defecto)
 
         else:
             step_defect = ""
@@ -1743,7 +1747,6 @@ def traceability_station_60_v2(serial_padre, defect_code_default=""):
         }
     }
 
-    # print(json.dumps(payload, indent=4))
-    return payload, codigo_defecto
+    return payload, array_codigo_defecto
 
-# traceability_station_60("P1472635-61-G:SE4A22172000000","")
+# datos = traceability_station_60_v2("P1472635-61-G:SE4A22172000000","")
