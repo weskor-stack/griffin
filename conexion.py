@@ -4079,6 +4079,199 @@ def cambio_status(name_piece):
         return "FAILED"
     
 ############################################################################################################################################
+####################################################### CÓDIGOS DE DEFECTO ##########################################################################
+
+def select_defect_combination():
+    """
+    Obtiene todas las combinaciones registradas en defect_combination.
+    Retorna lista de tuplas:
+    (combination_id, torque_state, angulo_state, rundown_state, defect_code, description)
+    """
+    try:
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        sql = """
+            SELECT combination_id, torque_state, angulo_state,
+                   rundown_state, defect_code, description
+            FROM defect_combination
+            ORDER BY combination_id ASC
+        """
+        cursor.execute(sql)
+        registros = cursor.fetchall()
+
+        cursor.close()
+        conn_local.close()
+        return registros
+    except Exception as e:
+        print(f"Error en select_defect_combination: {e}")
+        return []
+
+
+def obtener_defecto_por_combinacion(torque_state, angulo_state, rundown_state,
+                                     defect_code_default="ME99"):
+    """
+    Consulta la tabla defect_combination para obtener el código
+    según el estado de las 3 pruebas de screwing.
+
+    Parámetros:
+        torque_state   -> 'ALTO' | 'BAJO' | 'BUENO'
+        angulo_state   -> 'ALTO' | 'BAJO' | 'BUENO'
+        rundown_state  -> 'ALTO' | 'BAJO' | 'BUENO'
+
+    Si no encuentra la combinación, devuelve defect_code_default.
+    """
+    try:
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        sql = """
+            SELECT defect_code
+            FROM defect_combination
+            WHERE torque_state  = ?
+              AND angulo_state  = ?
+              AND rundown_state = ?
+            LIMIT 1
+        """
+        cursor.execute(sql, (torque_state, angulo_state, rundown_state))
+        row = cursor.fetchone()
+
+        cursor.close()
+        conn_local.close()
+
+        return row[0] if row else defect_code_default
+    except Exception as e:
+        print(f"Error en obtener_defecto_por_combinacion: {e}")
+        return defect_code_default
+
+
+def insert_defect_combination(torque_state, angulo_state, rundown_state,
+                              defect_code, description=""):
+    """Inserta una nueva combinación en defect_combination. Retorna el ID generado."""
+    try:
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        sql = """
+            INSERT INTO defect_combination
+                (torque_state, angulo_state, rundown_state, defect_code, description)
+            VALUES (?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (torque_state, angulo_state, rundown_state,
+                             defect_code, description))
+        conn_local.commit()
+        new_id = cursor.lastrowid
+
+        cursor.close()
+        conn_local.close()
+        return new_id
+    except Exception as e:
+        print(f"Error en insert_defect_combination: {e}")
+        return None
+
+
+def update_defect_combination(combination_id, torque_state, angulo_state,
+                              rundown_state, defect_code, description=""):
+    """Actualiza una combinación existente por ID."""
+    try:
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        sql = """
+            UPDATE defect_combination
+            SET torque_state  = ?,
+                angulo_state  = ?,
+                rundown_state = ?,
+                defect_code   = ?,
+                description   = ?
+            WHERE combination_id = ?
+        """
+        cursor.execute(sql, (torque_state, angulo_state, rundown_state,
+                             defect_code, description, combination_id))
+        conn_local.commit()
+
+        cursor.close()
+        conn_local.close()
+        return True
+    except Exception as e:
+        print(f"Error en update_defect_combination: {e}")
+        return False
+
+
+def delete_defect_combination(combination_id):
+    """Elimina una combinación por ID."""
+    try:
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        cursor.execute(
+            "DELETE FROM defect_combination WHERE combination_id = ?",
+            (combination_id,)
+        )
+        conn_local.commit()
+
+        cursor.close()
+        conn_local.close()
+        return True
+    except Exception as e:
+        print(f"Error en delete_defect_combination: {e}")
+        return False
+
+
+def registrar_combinacion_desconocida(torque_state, angulo_state, rundown_state,
+                                       serial_padre, part_id):
+    """
+    Registra en auditoría las combinaciones no encontradas en defect_combination.
+    Útil para detectar qué combinaciones nuevas aparecen en producción.
+    """
+    try:
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        sql = """
+            INSERT INTO defect_combination
+                (torque_state, angulo_state, rundown_state, serial_padre, part_id)
+            VALUES (?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (torque_state, angulo_state, rundown_state,
+                             serial_padre, part_id))
+        conn_local.commit()
+
+        cursor.close()
+        conn_local.close()
+        return True
+    except Exception as e:
+        print(f"Error en registrar_combinacion_desconocida: {e}")
+        return False
+
+
+def select_defect_combination_unknown(limite=100):
+    """
+    Obtiene las combinaciones desconocidas registradas en auditoría.
+    Útil para revisar qué combinaciones nuevas aparecieron en producción.
+    """
+    try:
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        sql = """
+            SELECT id, torque_state, angulo_state, rundown_state,
+                   serial_padre, part_id, detected_at
+            FROM defect_combination
+            ORDER BY id DESC
+            LIMIT ?
+        """
+        cursor.execute(sql, (limite,))
+        registros = cursor.fetchall()
+
+        cursor.close()
+        conn_local.close()
+        return registros
+    except Exception as e:
+        print(f"Error en select_defect_combination: {e}")
+        return []
+
+############################################################################################################################################
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
 # parameters_electrical(['Ct', '50', '10', '100', 'Numeric', 'N', 'OK', 'Comentarios'],name)

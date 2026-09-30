@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 import pendulum
 from history_csv import traceability_manager
 from zoneinfo import ZoneInfo
+import re
+from collections import defaultdict
 
 def evaluar_codigo_defecto(val_plc, low_lim, high_lim, plc_defect_code, test_name, atributos_db):
     if low_lim in (None, "") or high_lim in (None, ""):
@@ -1444,14 +1446,374 @@ def traceability_station_60(serial_padre, defect_code_default=""):
     return payload, codigo_defecto
 
 
-def traceability_station_60_v2(serial_padre, defect_code_default=""):
+# def traceability_station_60_v2(serial_padre, defect_code_default=""):
+#     config_local = conexion.configurador_st60()
+#     parte = conexion.obtener_parte2(serial_padre.strip())
+#     part_id = parte[0]
+#     measurement_key = parte[4]
+
+#     measkey = conexion.weight_data(part_id)
+#     measkey_value = measkey[0][0]
+
+#     if config_local and config_local != "FAILED":
+#         machine_id = str(config_local[1]).strip()
+#         operator_id = str(config_local[4]).strip()
+#         process_name = str(config_local[2]).strip()
+#     else:
+#         machine_id = "AMC-GENLD97"
+#         operator_id = "9999"
+#         process_name = "Pressfit"
+#         component_name_db = "component"
+#         program_version = "default_program"
+
+#     now = datetime.now(ZoneInfo("America/Mexico_City"))
+#     now_utc = now.strftime("%m-%d-%Y %I:%M:%S %p")
+
+#     fecha = str(parte[3])
+
+#     # Convertir la cadena a datetime
+#     fecha_dt = datetime.strptime(fecha, "%Y-%m-%d %H:%M:%S")
+
+#     # Dar el formato deseado
+#     fecha_formateada = fecha_dt.strftime("%m-%d-%Y %H:%M:%S %p")
+
+#     # ==========================================================
+#     # OBTENER ATRIBUTOS
+#     # ==========================================================
+
+#     atributos = conexion.select_attributes_st50_80()
+#     atributos_map = {}
+#     for attr in atributos:
+#         if len(attr) >= 7:
+#             nombre_atributo = str(attr[1]).lower().strip()
+#             atributos_map[nombre_atributo] = {
+#                 'defect_code_low': str(attr[5]).strip()
+#                 if attr[5] is not None else "",
+#                 'defect_code_high': str(attr[6]).strip()
+#                 if attr[6] is not None else "",
+#                 'name': attr[1]
+#             }
+
+#     # ==========================================================
+#     # OBTENER DATOS DE LAS ESTACIONES
+#     # ==========================================================
+
+#     part_row = part_id
+#     all_test_rows = []
+
+#     if part_row:
+#         try:
+#             sr = conexion.screwing_data_st60(part_id)
+#             if sr and isinstance(sr, list):
+#                 for item in sr:
+#                     all_test_rows.append(item + ('screwing',))
+#         except Exception:
+#             pass
+
+#         try:
+#             pr = conexion.pressfit_data_st60(part_id)
+#             if pr and isinstance(pr, list):
+#                 for item in pr:
+#                     all_test_rows.append(item + ('pressfit',))
+#         except Exception:
+#             pass
+
+#         try:
+#             ir = conexion.inspection_data_st60(part_id)
+#             if ir and isinstance(ir, list):
+#                 for item in ir:
+#                     all_test_rows.append(item + ('inspection',))
+#         except Exception:
+#             pass
+
+#         try:
+#             er = conexion.electrical_data_st60(part_id)
+#             if er and isinstance(er, list):
+#                 for item in er:
+#                     all_test_rows.append(item + ('electrical',))
+#         except Exception:
+#             pass
+
+#     # ==========================================================
+#     # PROCESAR RESULTADOS
+#     # ==========================================================
+
+#     steps_list = []
+#     global_status = "PASSED"
+#     codigo_defecto = ""
+#     array_codigo_defecto = []
+
+#     for row in all_test_rows:
+#         try:
+#             test_source = (
+#                 str(row[-1]).strip().lower()
+#                 if isinstance(row[-1], str)
+#                 and row[-1] in [
+#                     'screwing',
+#                     'pressfit',
+#                     'inspection',
+#                     'electrical'
+#                 ]
+#                 else ""
+#             )
+#             val_medido = (
+#                 float(row[1])
+#                 if row[1] is not None
+#                 else 0.0
+#             )
+#             lim_inf = (
+#                 float(row[2])
+#                 if row[2] is not None
+#                 else 0.0
+#             )
+#             lim_sup = (
+#                 float(row[3])
+#                 if row[3] is not None
+#                 else 0.0
+#             )
+
+#             unidad = (
+#                 str(row[5])
+#                 if row[5] is not None
+#                 else ""
+#             )
+#             status_step = (
+#                 str(row[6]).upper()
+#                 if row[6] is not None
+#                 else "PASSED"
+#             )
+#             # row[10] contiene, por ejemplo:
+#             # Torque_Screwing_1
+#             name_step = (
+#                 str(row[10])
+#                 if row[10] is not None
+#                 else "Measurement"
+#             )
+#             desc_step = (
+#                 str(row[10])
+#                 if row[10] is not None
+#                 else "Description"
+#             )
+#         except Exception:
+#             continue
+
+#         # ======================================================
+#         # SI EL PASO FALLÓ
+#         # ======================================================
+#         if status_step == "FAILED":
+
+#             global_status = "FAILED"
+
+#             # Código por defecto
+#             defect_code_low = defect_code_default
+#             defect_code_high = defect_code_default
+
+#             # ==================================================
+#             # BUSCAR ATRIBUTO DENTRO DE row[10]
+#             # ==================================================
+#             name_step_lower = name_step.lower().strip()
+#             atributo_encontrado = None
+
+#             # Ejemplo:
+#             # row[10] = "Torque_Screwing_1"
+#             #
+#             # atributos_map:
+#             # "torque"
+#             #
+#             # Se evalúa:
+#             #
+#             # "torque" in "torque_screwing_1"
+#             #
+#             # Resultado:
+#             # True
+
+#             for attr_name, attr_data in atributos_map.items():
+#                 if attr_name in name_step_lower:
+#                     atributo_encontrado = attr_data
+#                     break
+
+#             # ==================================================
+#             # SI ENCONTRÓ EL ATRIBUTO EN row[10]
+#             # ==================================================
+
+#             if atributo_encontrado:
+#                 defect_code_low = (
+#                     atributo_encontrado['defect_code_low']
+#                 )
+#                 defect_code_high = (
+#                     atributo_encontrado['defect_code_high']
+#                 )
+#             # ==================================================
+#             # SI NO LO ENCONTRÓ
+#             # ==================================================
+
+#             else:
+#                 source_to_attribute = {
+#                     'screwing': 'SCREWING',
+#                     'pressfit': 'PRESSFIT',
+#                     'inspection': 'INSPECTION',
+#                     'electrical': 'ELECTRICAL'
+#                 }
+
+#                 attr_name = source_to_attribute.get(
+#                     test_source,
+#                     name_step.upper()
+#                 )
+
+#                 if attr_name.lower() in atributos_map:
+
+#                     defect_code_low = (
+#                         atributos_map[
+#                             attr_name.lower()
+#                         ]['defect_code_low']
+#                     )
+
+#                     defect_code_high = (
+#                         atributos_map[
+#                             attr_name.lower()
+#                         ]['defect_code_high']
+#                     )
+
+#                 elif name_step_lower in atributos_map:
+
+#                     defect_code_low = (
+#                         atributos_map[
+#                             name_step_lower
+#                         ]['defect_code_low']
+#                     )
+
+#                     defect_code_high = (
+#                         atributos_map[
+#                             name_step_lower
+#                         ]['defect_code_high']
+#                     )
+
+#             if val_medido < lim_inf:
+#                 step_defect = (
+#                     defect_code_low
+#                     if defect_code_low
+#                     else defect_code_default
+#                 )
+#                 codigo_defecto = step_defect
+#                 array_codigo_defecto.append(codigo_defecto)
+
+#             elif val_medido > lim_sup:
+#                 step_defect = (
+#                     defect_code_high
+#                     if defect_code_high
+#                     else defect_code_default
+#                 )
+#                 codigo_defecto = step_defect
+#                 array_codigo_defecto.append(codigo_defecto)
+#             else:
+#                 step_defect = (
+#                     defect_code_high
+#                     if defect_code_high
+#                     else (
+#                         defect_code_low
+#                         if defect_code_low
+#                         else defect_code_default
+#                     )
+#                 )
+#                 codigo_defecto = step_defect
+#                 array_codigo_defecto.append(codigo_defecto)
+
+#         else:
+#             step_defect = ""
+
+
+#         steps_list.append({
+#             "name": name_step,
+#             "description": desc_step,
+#             "comparator": "GELE",
+#             "lowLimit": lim_inf,
+#             "highLimit": lim_sup,
+#             "units": unidad,
+#             "status": status_step,
+#             "value": val_medido,
+#             "defect_code": step_defect
+#         })
+
+#     payload = {
+#         "serial": serial_padre,
+#         "product": measurement_key,
+#         "station": machine_id,
+#         "operator": operator_id,
+#         "start_time": fecha_formateada,
+#         "end_time": now_utc,
+#         "measkey": measkey_value,
+#         "process_name": process_name,
+#         "status": global_status,
+#         "test_steps": {
+#             f"{machine_id} LIST": steps_list
+#         }
+#     }
+
+#     return payload, array_codigo_defecto
+
+################################################################## Traceability para la st 60 ##########################################################
+
+DEFECT_CODE_DEFAULT = "ME99"
+
+# ==========================================================
+# FUNCIONES AUXILIARES
+# ==========================================================
+
+def _extraer_numero_tornillo(nombre_paso):
+    """Extrae el número final de 'Torque_Screwing_1' -> '1'."""
+    m = re.search(r"_(\d+)$", str(nombre_paso).strip())
+    return m.group(1) if m else None
+
+
+def _detectar_tipo_prueba(nombre_paso):
+    """
+    Detecta el tipo de prueba del nombre del paso.
+    IMPORTANTE: 'rundown' se evalúa ANTES que 'angle'
+    para evitar que 'angle' capture 'rundown angle'.
+    """
+    nombre = str(nombre_paso).lower().replace("_", " ")
+
+    if "rundown" in nombre:
+        return "rundown"
+    if "torque" in nombre:
+        return "torque"
+    if "angle" in nombre:
+        return "angulo"
+    return None
+
+
+def _calcular_estado(val_medido, lim_inf, lim_sup, status_step):
+    """
+    Devuelve 'ALTO', 'BAJO' o 'BUENO' según el valor medido.
+
+    - val < lim_inf  -> 'BAJO'
+    - val > lim_sup  -> 'ALTO'
+    - dentro de límites:
+        - si status es PASSED -> 'BUENO'
+        - si status es FAILED -> se fuerza 'ALTO' (caso borde)
+    """
+    if val_medido < lim_inf:
+        return "BAJO"
+    if val_medido > lim_sup:
+        return "ALTO"
+
+    if status_step == "FAILED":
+        return "ALTO"
+
+    return "BUENO"
+
+# ==========================================================
+# FUNCIÓN PRINCIPAL
+# ==========================================================
+
+def traceability_station_60_v2(serial_padre):
     config_local = conexion.configurador_st60()
     parte = conexion.obtener_parte2(serial_padre.strip())
     part_id = parte[0]
     measurement_key = parte[4]
 
     measkey = conexion.weight_data(part_id)
-    measkey_value = measkey[0][0]
+    measkey_value = measkey[0][0] if measkey else ""
 
     if config_local and config_local != "FAILED":
         machine_id = str(config_local[1]).strip()
@@ -1461,277 +1823,155 @@ def traceability_station_60_v2(serial_padre, defect_code_default=""):
         machine_id = "AMC-GENLD97"
         operator_id = "9999"
         process_name = "Pressfit"
-        component_name_db = "component"
-        program_version = "default_program"
 
     now = datetime.now(ZoneInfo("America/Mexico_City"))
     now_utc = now.strftime("%m-%d-%Y %I:%M:%S %p")
 
     fecha = str(parte[3])
-
-    # Convertir la cadena a datetime
     fecha_dt = datetime.strptime(fecha, "%Y-%m-%d %H:%M:%S")
-
-    # Dar el formato deseado
     fecha_formateada = fecha_dt.strftime("%m-%d-%Y %H:%M:%S %p")
 
     # ==========================================================
-    # OBTENER ATRIBUTOS
+    # OBTENER DATOS DE SCREWING
     # ==========================================================
-
-    atributos = conexion.select_attributes_st50_80()
-    atributos_map = {}
-    for attr in atributos:
-        if len(attr) >= 7:
-            nombre_atributo = str(attr[1]).lower().strip()
-            atributos_map[nombre_atributo] = {
-                'defect_code_low': str(attr[5]).strip()
-                if attr[5] is not None else "",
-                'defect_code_high': str(attr[6]).strip()
-                if attr[6] is not None else "",
-                'name': attr[1]
-            }
-
-    # ==========================================================
-    # OBTENER DATOS DE LAS ESTACIONES
-    # ==========================================================
-
-    part_row = part_id
     all_test_rows = []
 
-    if part_row:
+    if part_id:
         try:
             sr = conexion.screwing_data_st60(part_id)
             if sr and isinstance(sr, list):
                 for item in sr:
-                    all_test_rows.append(item + ('screwing',))
-        except Exception:
-            pass
-
-        try:
-            pr = conexion.pressfit_data_st60(part_id)
-            if pr and isinstance(pr, list):
-                for item in pr:
-                    all_test_rows.append(item + ('pressfit',))
-        except Exception:
-            pass
-
-        try:
-            ir = conexion.inspection_data_st60(part_id)
-            if ir and isinstance(ir, list):
-                for item in ir:
-                    all_test_rows.append(item + ('inspection',))
-        except Exception:
-            pass
-
-        try:
-            er = conexion.electrical_data_st60(part_id)
-            if er and isinstance(er, list):
-                for item in er:
-                    all_test_rows.append(item + ('electrical',))
-        except Exception:
-            pass
+                    all_test_rows.append(item)
+        except Exception as e:
+            print(f"Error al obtener screwing_data_st60: {e}")
 
     # ==========================================================
-    # PROCESAR RESULTADOS
+    # AGRUPAR POR TORNILLO Y CALCULAR ESTADOS
     # ==========================================================
-
-    steps_list = []
-    global_status = "PASSED"
-    codigo_defecto = ""
-    array_codigo_defecto = []
+    # estado_por_tornillo = {
+    #   "1": {"torque": "BAJO", "angulo": "BUENO", "rundown": "BUENO"},
+    #   ...
+    # }
+    estado_por_tornillo = defaultdict(lambda: {
+        "torque": "BUENO", "angulo": "BUENO", "rundown": "BUENO"
+    })
+    rows_por_tornillo = defaultdict(list)
 
     for row in all_test_rows:
         try:
-            test_source = (
-                str(row[-1]).strip().lower()
-                if isinstance(row[-1], str)
-                and row[-1] in [
-                    'screwing',
-                    'pressfit',
-                    'inspection',
-                    'electrical'
-                ]
-                else ""
-            )
-            val_medido = (
-                float(row[1])
-                if row[1] is not None
-                else 0.0
-            )
-            lim_inf = (
-                float(row[2])
-                if row[2] is not None
-                else 0.0
-            )
-            lim_sup = (
-                float(row[3])
-                if row[3] is not None
-                else 0.0
-            )
+            # Columnas esperadas en parameters_screwing:
+            #   row[1]  = value
+            #   row[2]  = low_limit
+            #   row[3]  = high_limit
+            #   row[5]  = unit
+            #   row[6]  = result
+            #   row[10] = description
+            name_step = str(row[10]) if len(row) > 10 and row[10] is not None else ""
+            num_tornillo = _extraer_numero_tornillo(name_step)
+            tipo_prueba = _detectar_tipo_prueba(name_step)
 
-            unidad = (
-                str(row[5])
-                if row[5] is not None
-                else ""
-            )
-            status_step = (
-                str(row[6]).upper()
-                if row[6] is not None
-                else "PASSED"
-            )
-            # row[10] contiene, por ejemplo:
-            # Torque_Screwing_1
-            name_step = (
-                str(row[10])
-                if row[10] is not None
-                else "Measurement"
-            )
-            desc_step = (
-                str(row[10])
-                if row[10] is not None
-                else "Description"
-            )
-        except Exception:
+            if num_tornillo is None or tipo_prueba is None:
+                continue
+
+            val_medido = float(row[1]) if row[1] is not None else 0.0
+            lim_inf = float(row[2]) if row[2] is not None else 0.0
+            lim_sup = float(row[3]) if row[3] is not None else 0.0
+            status_step = str(row[6]).upper() if row[6] is not None else "PASSED"
+
+            estado = _calcular_estado(val_medido, lim_inf, lim_sup, status_step)
+
+            estado_por_tornillo[num_tornillo][tipo_prueba] = estado
+            rows_por_tornillo[num_tornillo].append(row)
+
+        except Exception as e:
+            print(f"Error procesando row: {e}")
             continue
 
-        # ======================================================
-        # SI EL PASO FALLÓ
-        # ======================================================
-        if status_step == "FAILED":
+    # ==========================================================
+    # CONSULTAR COMBINACIÓN POR TORNILLO
+    # ==========================================================
+    cache_combinaciones = {}
+    codigo_por_tornillo = {}
 
-            global_status = "FAILED"
+    for num_tornillo, estados in estado_por_tornillo.items():
+        clave = (estados["torque"], estados["angulo"], estados["rundown"])
 
-            # Código por defecto
-            defect_code_low = defect_code_default
-            defect_code_high = defect_code_default
-
-            # ==================================================
-            # BUSCAR ATRIBUTO DENTRO DE row[10]
-            # ==================================================
-            name_step_lower = name_step.lower().strip()
-            atributo_encontrado = None
-
-            # Ejemplo:
-            # row[10] = "Torque_Screwing_1"
-            #
-            # atributos_map:
-            # "torque"
-            #
-            # Se evalúa:
-            #
-            # "torque" in "torque_screwing_1"
-            #
-            # Resultado:
-            # True
-
-            for attr_name, attr_data in atributos_map.items():
-                if attr_name in name_step_lower:
-                    atributo_encontrado = attr_data
-                    break
-
-            # ==================================================
-            # SI ENCONTRÓ EL ATRIBUTO EN row[10]
-            # ==================================================
-
-            if atributo_encontrado:
-                defect_code_low = (
-                    atributo_encontrado['defect_code_low']
-                )
-                defect_code_high = (
-                    atributo_encontrado['defect_code_high']
-                )
-            # ==================================================
-            # SI NO LO ENCONTRÓ
-            # ==================================================
-
-            else:
-                source_to_attribute = {
-                    'screwing': 'SCREWING',
-                    'pressfit': 'PRESSFIT',
-                    'inspection': 'INSPECTION',
-                    'electrical': 'ELECTRICAL'
-                }
-
-                attr_name = source_to_attribute.get(
-                    test_source,
-                    name_step.upper()
-                )
-
-                if attr_name.lower() in atributos_map:
-
-                    defect_code_low = (
-                        atributos_map[
-                            attr_name.lower()
-                        ]['defect_code_low']
-                    )
-
-                    defect_code_high = (
-                        atributos_map[
-                            attr_name.lower()
-                        ]['defect_code_high']
-                    )
-
-                elif name_step_lower in atributos_map:
-
-                    defect_code_low = (
-                        atributos_map[
-                            name_step_lower
-                        ]['defect_code_low']
-                    )
-
-                    defect_code_high = (
-                        atributos_map[
-                            name_step_lower
-                        ]['defect_code_high']
-                    )
-
-            if val_medido < lim_inf:
-                step_defect = (
-                    defect_code_low
-                    if defect_code_low
-                    else defect_code_default
-                )
-                codigo_defecto = step_defect
-                array_codigo_defecto.append(codigo_defecto)
-
-            elif val_medido > lim_sup:
-                step_defect = (
-                    defect_code_high
-                    if defect_code_high
-                    else defect_code_default
-                )
-                codigo_defecto = step_defect
-                array_codigo_defecto.append(codigo_defecto)
-            else:
-                step_defect = (
-                    defect_code_high
-                    if defect_code_high
-                    else (
-                        defect_code_low
-                        if defect_code_low
-                        else defect_code_default
-                    )
-                )
-                codigo_defecto = step_defect
-                array_codigo_defecto.append(codigo_defecto)
-
+        if clave in cache_combinaciones:
+            codigo = cache_combinaciones[clave]
         else:
-            step_defect = ""
+            codigo = conexion.obtener_defecto_por_combinacion(
+                torque_state=clave[0],
+                angulo_state=clave[1],
+                rundown_state=clave[2],
+                defect_code_default=DEFECT_CODE_DEFAULT
+            )
+            cache_combinaciones[clave] = codigo
 
+            # if codigo == DEFECT_CODE_DEFAULT:
+            #     conexion.registrar_combinacion_desconocida(
+            #         clave[0], clave[1], clave[2],
+            #         serial_padre, part_id
+            #     )
 
-        steps_list.append({
-            "name": name_step,
-            "description": desc_step,
-            "comparator": "GELE",
-            "lowLimit": lim_inf,
-            "highLimit": lim_sup,
-            "units": unidad,
-            "status": status_step,
-            "value": val_medido,
-            "defect_code": step_defect
-        })
+        codigo_por_tornillo[num_tornillo] = codigo
 
+    # ==========================================================
+    # ARMAR steps_list
+    # ==========================================================
+    steps_list = []
+    global_status = "PASSED"
+    array_codigo_defecto = []
+
+    for num_tornillo, rows in rows_por_tornillo.items():
+        # Código de la combinación para este tornillo
+        codigo_combinacion = codigo_por_tornillo.get(
+            num_tornillo, DEFECT_CODE_DEFAULT
+        )
+
+        for row in rows:
+            try:
+                val_medido = float(row[1]) if row[1] is not None else 0.0
+                lim_inf = float(row[2]) if row[2] is not None else 0.0
+                lim_sup = float(row[3]) if row[3] is not None else 0.0
+                unidad = str(row[5]) if row[5] is not None else ""
+                status_step = str(row[6]).upper() if row[6] is not None else "PASSED"
+                name_step = (
+                    str(row[10])
+                    if len(row) > 10 and row[10] is not None
+                    else "Measurement"
+                )
+                desc_step = name_step
+            except Exception:
+                continue
+
+            # ==================================================
+            # ASIGNAR CÓDIGO SOLO AL STEP QUE FALLÓ
+            # ==================================================
+            if status_step == "FAILED":
+                global_status = "FAILED"
+                step_defect = codigo_combinacion
+
+                # Evitar duplicados: solo agregar si no existe
+                if step_defect not in array_codigo_defecto:
+                    array_codigo_defecto.append(step_defect)
+            else:
+                step_defect = ""
+
+            steps_list.append({
+                "name": name_step,
+                "description": desc_step,
+                "comparator": "GELE",
+                "lowLimit": lim_inf,
+                "highLimit": lim_sup,
+                "units": unidad,
+                "status": status_step,
+                "value": val_medido,
+                "defect_code": step_defect
+            })
+
+    # ==========================================================
+    # PAYLOAD
+    # ==========================================================
     payload = {
         "serial": serial_padre,
         "product": measurement_key,
@@ -1749,4 +1989,6 @@ def traceability_station_60_v2(serial_padre, defect_code_default=""):
 
     return payload, array_codigo_defecto
 
-# datos = traceability_station_60_v2("P1472635-61-G:SE4A22172000000","")
+# datos = traceability_station_60_v2("P1472635-61-G:SE4A22172000000")
+# print(json.dumps(datos[0], indent=4))
+# print(datos[1])
