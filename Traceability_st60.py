@@ -947,7 +947,15 @@ def worker(conn, addr):
                                         parent_part_number   = PART_NUMBER_GLOBAL
                                     )
 
-                                    response_interlocking = requests.post(url_interlocking, json=payload_interlocking, timeout=30)
+                                    try:
+                                        response_interlocking = requests.post(url_interlocking, json=payload_interlocking, timeout=30)
+                                    except requests.exceptions.RequestException as e:
+                                        safe_insert(f"❌ Error en la solicitud a Interlocking: {e}", "red")
+                                        logging.error(f"Error en la solicitud a Interlocking: {e}")
+                                        conn.send("FAILED".encode('UTF-8'))
+                                        green_label.configure(image=image_green)
+                                        red_label.configure(image=image_red_full)
+                                        break
 
                                     if response_interlocking.status_code != 200:
                                         safe_insert(f"Interlocking HTTP {response_interlocking.status_code}", "red")
