@@ -1254,6 +1254,28 @@ def worker(conn, addr):
                         pantalla_final = ""
 
                         name_piece = option[-2]
+
+                        dato = option[-3].strip()
+
+                        numero = None
+                        ultimo = None
+
+                        partes = dato.split()
+
+                        try:
+                            numero = int(partes[0])
+                            ultimo = partes[1] if len(partes) > 1 else None
+
+                        except ValueError:
+                            safe_insert(f"❌ Error parsing end_process command: {dato}", "red")
+                            logging.error(f"Error parsing end_process command: {dato}")
+                            conn.send("FAILED".encode('UTF-8'))
+                            green_label.configure(image=image_green)
+                            red_label.configure(image=image_red_full)
+                            conexionBitacora.event("ENDP-002","|Command received| "+comando_completo + "\n"+str(e),month,day)
+                            conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
+                            break
+
                         if len(option) == 6 and option[-1] == '1/':
                             duration = conexion.duration(cadena,option[4])
 
@@ -1266,7 +1288,7 @@ def worker(conn, addr):
                                 try:
                                     logging.info(f"URL Traceability: {url_traceability}")
 
-                                    payload_traceability = traceability_json.traceability_station_60_v2(option[4])
+                                    payload_traceability = traceability_json.traceability_station_60_v3(option[4],numero)
                                     defect_code = payload_traceability[1]
                                     payload_traceability = payload_traceability[0]
 
@@ -1368,7 +1390,7 @@ def worker(conn, addr):
 
                                         ######################################################### VERIFICAR ÚLTIMO INTENTO #########################################################
 
-                                        if option[-3] == "ultimo":
+                                        if ultimo == "ultimo":
                                             payload_conduit_end = conduit_json.conduit_st60_v3(name_piece,4, "")
                                                                                         
                                             response_conduit_end = requests.post(url_conduit, json=payload_conduit_end, timeout=30)

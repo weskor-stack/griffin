@@ -1989,6 +1989,218 @@ def traceability_station_60_v2(serial_padre):
 
     return payload, array_codigo_defecto
 
-# datos = traceability_station_60_v2("P1472635-61-G:SE4A22172000000")
+
+# ==========================================================
+# FUNCIÓN traceability_station_60 - VERSIÓN 3
+# ==========================================================
+def traceability_station_60_v3(serial_padre, numero_tornillo):
+    """
+    Versión filtrada por número de tornillo.
+
+    Parámetros:
+        serial_padre    -> string con el serial de la pieza
+        numero_tornillo -> número (int o str) del tornillo a procesar.
+                           Debe ser >= 1.
+
+    Retorna:
+        (payload, array_codigo_defecto) si el tornillo existe.
+        None si el tornillo NO existe en los datos de screwing.
+    """
+    # ------------------------------------------------------
+    # VALIDACIÓN DEL NÚMERO DE TORNILLO
+    # ------------------------------------------------------
+    try:
+        numero_tornillo_int = int(numero_tornillo)
+    except (ValueError, TypeError):
+        print(f"[v3] Número de tornillo inválido: {numero_tornillo}")
+        return None
+
+    if numero_tornillo_int < 1:
+        print(f"[v3] El número de tornillo debe ser >= 1. Recibido: {numero_tornillo_int}")
+        return None
+
+    numero_tornillo_str = str(numero_tornillo_int)
+
+    # ------------------------------------------------------
+    # CONFIGURACIÓN Y DATOS BÁSICOS
+    # ------------------------------------------------------
+    config_local = conexion.configurador_st60()
+    parte = conexion.obtener_parte2(serial_padre.strip())
+    part_id = parte[0]
+    measurement_key = parte[4]
+
+    measkey = conexion.weight_data(part_id)
+    measkey_value = measkey[0][0] if measkey else ""
+
+    if config_local and config_local != "FAILED":
+        machine_id = str(config_local[1]).strip()
+        operator_id = str(config_local[4]).strip()
+        process_name = str(config_local[2]).strip()
+    else:
+        machine_id = "AMC-GENLD97"
+        operator_id = "9999"
+        process_name = "Pressfit"
+
+    now = datetime.now(ZoneInfo("America/Mexico_City"))
+    now_utc = now.strftime("%m-%d-%Y %I:%M:%S %p")
+
+    fecha = str(parte[3])
+    fecha_dt = datetime.strptime(fecha, "%Y-%m-%d %H:%M:%S")
+    fecha_formateada = fecha_dt.strftime("%m-%d-%Y %H:%M:%S %p")
+
+    # ==========================================================
+    # OBTENER DATOS DE SCREWING
+    # ==========================================================
+    all_test_rows = []
+
+    if part_id:
+        try:
+            sr = conexion.screwing_data_st60(part_id)
+            if sr and isinstance(sr, list):
+                for item in sr:
+                    all_test_rows.append(item)
+        except Exception as e:
+            print(f"Error al obtener screwing_data_st60: {e}")
+
+    # ==========================================================
+    # FILTRAR SOLO LOS ROWS DEL TORNILLO SOLICITADO
+    # ==========================================================
+    rows_tornillo = []
+
+    for row in all_test_rows:
+        try:
+            name_step = str(row[10]) if len(row) > 10 and row[10] is not None else ""
+            num_tornillo_row = _extraer_numero_tornillo(name_step)
+
+            if num_tornillo_row == numero_tornillo_str:
+                rows_tornillo.append(row)
+
+        except Exception as e:
+            print(f"Error filtrando row: {e}")
+            continue
+
+    # ------------------------------------------------------
+    # SI NO HAY DATOS DEL TORNILLO, RETORNAR None
+    # ------------------------------------------------------
+    if not rows_tornillo:
+        print(f"[v3] No se encontraron datos para el tornillo {numero_tornillo_int}")
+        return None
+
+    # ==========================================================
+    # CALCULAR ESTADOS DEL TORNILLO
+    # ==========================================================
+    estados = {
+        "torque": "BUENO",
+        "angulo": "BUENO",
+        "rundown": "BUENO"
+    }
+
+    for row in rows_tornillo:
+        try:
+            name_step = str(row[10]) if len(row) > 10 and row[10] is not None else ""
+            tipo_prueba = _detectar_tipo_prueba(name_step)
+
+            if tipo_prueba is None:
+                continue
+
+            val_medido = float(row[1]) if row[1] is not None else 0.0
+            lim_inf = float(row[2]) if row[2] is not None else 0.0
+            lim_sup = float(row[3]) if row[3] is not None else 0.0
+            status_step = str(row[6]).upper() if row[6] is not None else "PASSED"
+
+            estado = _calcular_estado(val_medido, lim_inf, lim_sup, status_step)
+            estados[tipo_prueba] = estado
+
+        except Exception as e:
+            print(f"Error calculando estado: {e}")
+            continue
+
+    # ==========================================================
+    # CONSULTAR COMBINACIÓN
+    # ==========================================================
+    clave = (estados["torque"], estados["angulo"], estados["rundown"])
+
+    codigo_combinacion = conexion.obtener_defecto_por_combinacion(
+        torque_state=clave[0],
+        angulo_state=clave[1],
+        rundown_state=clave[2],
+        defect_code_default=DEFECT_CODE_DEFAULT
+    )
+
+    if codigo_combinacion == DEFECT_CODE_DEFAULT:
+        conexion.registrar_combinacion_desconocida(
+            clave[0], clave[1], clave[2],
+            serial_padre, part_id
+        )
+
+    # ==========================================================
+    # ARMAR steps_list (SOLO DEL TORNILLO SOLICITADO)
+    # ==========================================================
+    steps_list = []
+    global_status = "PASSED"
+    array_codigo_defecto = []
+
+    for row in rows_tornillo:
+        try:
+            val_medido = float(row[1]) if row[1] is not None else 0.0
+            lim_inf = float(row[2]) if row[2] is not None else 0.0
+            lim_sup = float(row[3]) if row[3] is not None else 0.0
+            unidad = str(row[5]) if row[5] is not None else ""
+            status_step = str(row[6]).upper() if row[6] is not None else "PASSED"
+            name_step = (
+                str(row[10])
+                if len(row) > 10 and row[10] is not None
+                else "Measurement"
+            )
+            desc_step = name_step
+        except Exception:
+            continue
+
+        # ==================================================
+        # ASIGNAR CÓDIGO SOLO AL STEP QUE FALLÓ
+        # ==================================================
+        if status_step == "FAILED":
+            global_status = "FAILED"
+            step_defect = codigo_combinacion
+
+            # Evitar duplicados en el array de códigos
+            if step_defect not in array_codigo_defecto:
+                array_codigo_defecto.append(step_defect)
+        else:
+            step_defect = ""
+
+        steps_list.append({
+            "name": name_step,
+            "description": desc_step,
+            "comparator": "GELE",
+            "lowLimit": lim_inf,
+            "highLimit": lim_sup,
+            "units": unidad,
+            "status": status_step,
+            "value": val_medido,
+            "defect_code": step_defect
+        })
+
+    # ==========================================================
+    # PAYLOAD
+    # ==========================================================
+    payload = {
+        "serial": serial_padre,
+        "product": measurement_key,
+        "station": machine_id,
+        "operator": operator_id,
+        "start_time": fecha_formateada,
+        "end_time": now_utc,
+        "measkey": measkey_value,
+        "process_name": process_name,
+        "status": global_status,
+        "test_steps": {
+            f"{machine_id} LIST": steps_list
+        }
+    }
+
+    return payload, array_codigo_defecto
+
+# datos = traceability_station_60_v3("P1472635-61-G:SE4A22172000003", 4)
 # print(json.dumps(datos[0], indent=4))
 # print(datos[1])
