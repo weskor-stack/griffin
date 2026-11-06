@@ -1,4 +1,5 @@
 import json
+from logging import config
 import conexion
 
 def interlocking_station_20(parent_serial_number, parent_part_number, heater_part_numbers):
@@ -249,16 +250,12 @@ def interlocking_station_100(serial_number, part_number):
 #ESTACION 60
 def interlocking_st60(parent_serial_number, parent_part_number):
     config = conexion.configurador_st60()
-    if not config or config == "FAILED":
-        program_name_version = ""
-        machine_id           = ""
-        process_name         = ""
-        operator_id          = ""
-    else:
-        program_name_version = str(config[0]).strip()
-        machine_id           = str(config[1]).strip()
-        process_name         = str(config[2]).strip()
-        operator_id          = str(config[4]).strip()
+
+    program_name_version = str(config[0]).strip()
+    machine_id           = str(config[1]).strip()
+    process_name         = str(config[2]).strip()
+    operator_id          = str(config[4]).strip()
+        
 
     payload = {
         "serial":       parent_serial_number,

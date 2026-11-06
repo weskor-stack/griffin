@@ -54,7 +54,6 @@ class DatabaseManager:
             cursor.close()
             
             logging.info("✅ Conexión a BD establecida correctamente")
-            print("✅ Conexión a BD establecida correctamente")
             
         except mariadb.Error as e:
             logging.error(f"❌ Error conectando a BD: {e}")
@@ -634,7 +633,7 @@ def parameters_screwing(element, name_piece):
             return "FAILED"
         value, low_limit, high_limit, data_type, units, result, metadata = element[1:8]
         compoperator = evaluation.evaluation(element[1:4])
-        description = f"{measurement[1]}_{element[8]}"
+        description = f"{measurement[1]}_Screwing_{element[8]}"
         screwing_measurement_id = measurement[0]
         station_id = station[0]
         part_id = part[0]
@@ -978,17 +977,17 @@ def duration(element, name_piece):
             cursor.execute(sql, val)
             conn.commit()
 
-        # Desactivar piezas anteriores
-        cursor = conn.cursor()
-        cursor.execute("UPDATE part SET status_id = ? WHERE status_id = ? AND part_number = ?", (2, 3, name_piece))
-        conn.commit()
-        cursor.close()
+        # # Desactivar piezas anteriores
+        # cursor = conn.cursor()
+        # cursor.execute("UPDATE part SET status_id = ? WHERE status_id = ? AND part_number = ?", (2, 3, name_piece))
+        # conn.commit()
+        # cursor.close()
 
         # Eliminar pieza de la tabla serial_number
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM serial_number WHERE data = ?", (name_piece,))
-        conn.commit()
-        cursor.close()
+        # cursor = conn.cursor()
+        # cursor.execute("DELETE FROM serial_number WHERE data = ?", (name_piece,))
+        # conn.commit()
+        # cursor.close()
 
         # Registrar en historial
         # num_piece = [""] * 13 + [taskresult, tasktimestamp, taskduration, metadata]
@@ -1323,7 +1322,8 @@ def weight_data(part_id):
                     description
                 FROM weight
                 WHERE part_id = %s
-                ORDER BY weight_id ASC
+                ORDER BY weight_id desc
+                LIMIT 1
             ''', (part_id,))
             # print(cursor.fetchall())
             return cursor.fetchall()
@@ -3807,6 +3807,470 @@ def obtener_parte2(serial_number):
     except Exception as e:
         print("[ERROR] No se encontraron atributos.")
         return []
+############################################################################################################################################
+
+def screwing_current_state(serial_padre, desde_id=0):
+    """
+    Recupera el estado actual de Screwing para el ciclo ST60 actual.
+
+    Reglas:
+    - Solo toma registros posteriores al START actual usando desde_id.
+    - Si un tornillo tuvo varios reintentos, toma solo el último registro
+      por description + screwing_measurement_id.
+    - Evita traer historial viejo de la misma pieza/serial.
+
+    Retorna ps.* + sm.key + sm.name.
+    Por eso traceability_json.py puede leer:
+    row[-2] = key técnica, ejemplo T, A, PX, PY
+    row[-1] = nombre, ejemplo Torque, Angles, Position X
+    """
+    try:
+        serial_padre = str(serial_padre).strip()
+
+        try:
+            desde_id = int(desde_id or 0)
+        except Exception:
+            desde_id = 0
+
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        cursor.execute(
+            """
+            SELECT part_id
+            FROM part
+            WHERE part_number = ?
+            ORDER BY
+                CASE WHEN status_id = 3 THEN 0 ELSE 1 END,
+                part_id DESC
+            LIMIT 1
+            """,
+            (serial_padre,)
+        )
+        part = cursor.fetchone()
+
+        if not part:
+            print(f"[SCREWING CURRENT STATE] No se encontró part para serial: {serial_padre}")
+            cursor.close()
+            conn_local.close()
+            return []
+
+        part_id = part[0]
+
+        sql = """
+            SELECT
+                ps.*,
+                sm.key AS measurement_key,
+                sm.name AS measurement_type
+            FROM parameters_screwing ps
+            INNER JOIN screwing_measurement sm
+                ON sm.screwing_measurement_id = ps.screwing_measurement_id
+            INNER JOIN (
+                SELECT
+                    description,
+                    screwing_measurement_id,
+                    MAX(parameters_screwing_id) AS ultimo_id
+                FROM parameters_screwing
+                WHERE part_id = ?
+                  AND parameters_screwing_id > ?
+                GROUP BY description, screwing_measurement_id
+            ) ult
+                ON ps.parameters_screwing_id = ult.ultimo_id
+            WHERE ps.part_id = ?
+              AND ps.parameters_screwing_id > ?
+            ORDER BY ps.parameters_screwing_id ASC
+        """
+        cursor.execute(sql, (part_id, desde_id, part_id, desde_id))
+        rows = cursor.fetchall()
+
+        cursor.close()
+        conn_local.close()
+
+        print(
+            f"[SCREWING CURRENT STATE] serial={serial_padre} "
+            f"part_id={part_id} desde_id={desde_id} registros={len(rows)}"
+        )
+
+        return rows
+
+    except Exception as e:
+        print(f"[ERROR] screwing_current_state(): {e}")
+        return []
+
+############################################################################################################################################
+
+def obtener_ultimo_id_screwing(serial_padre):
+    """
+    Devuelve el último parameters_screwing_id existente para este serial
+    justo antes de iniciar el ciclo actual.
+
+    Se usa para evitar que ST60 tome mediciones viejas de la misma pieza/serial
+    cuando se hacen pruebas repetidas o reprocesos.
+    """
+    try:
+        serial_padre = str(serial_padre).strip()
+
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        cursor.execute(
+            """
+            SELECT part_id
+            FROM part
+            WHERE part_number = ?
+            ORDER BY
+                CASE WHEN status_id = 3 THEN 0 ELSE 1 END,
+                part_id DESC
+            LIMIT 1
+            """,
+            (serial_padre,)
+        )
+        part = cursor.fetchone()
+
+        if not part:
+            cursor.close()
+            conn_local.close()
+            return 0
+
+        part_id = part[0]
+
+        cursor.execute(
+            """
+            SELECT COALESCE(MAX(parameters_screwing_id), 0)
+            FROM parameters_screwing
+            WHERE part_id = ?
+            """,
+            (part_id,)
+        )
+        row = cursor.fetchone()
+
+        cursor.close()
+        conn_local.close()
+
+        return int(row[0]) if row and row[0] is not None else 0
+
+    except Exception as e:
+        print(f"[ERROR] obtener_ultimo_id_screwing(): {e}")
+        return 0
+
+############################################################################################################################################
+
+def _get_last_records(table, part_id, columns, id_column, status_column='status_id'):
+    """
+    Helper para obtener registros con filtro por reintentos.
+    
+    Regla de negocio (por cada description):
+    1. Si el último registro es PASS → mostrar SOLO el PASS
+    2. Si el último registro es FAIL → mostrar SOLO el FAIL con más reintentos
+    """
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                # Construir cláusulas de filtro
+                # if status_column:
+                #     status_filter = f"AND t.{status_column} = 1"
+                #     status_filter_sub = f"AND {status_column} = 1"
+                # else:
+                status_filter = ""
+                status_filter_sub = ""
+                
+                select_clause = columns if columns and columns != '*' else 't.*'
+                
+                sql = f'''
+                    SELECT {select_clause}
+                    FROM {table} t
+                    WHERE t.part_id = %s
+                    {status_filter}
+                    AND (
+                        -- Caso 1: Último registro de esta description es PASS
+                        -- → mostrar SOLO el PASS
+                        (
+                            t.result = 'PASSED'
+                            AND NOT EXISTS (
+                                SELECT 1 
+                                FROM {table} u
+                                WHERE u.description = t.description
+                                AND u.part_id = %s
+                                {status_filter_sub.replace('t.', 'u.') if status_column else ''}
+                                AND u.{id_column} > t.{id_column}
+                            )
+                        )
+                        
+                        -- Caso 2: Último registro de esta description es FAIL
+                        -- → mostrar SOLO el FAILED con MAX reintentos
+                        OR (
+                            t.result = 'FAILED'
+                            -- Es el FAILED con el máximo reintento para esta description
+                            AND t.metadata = (
+                                SELECT MAX(metadata)
+                                FROM {table} f
+                                WHERE f.description = t.description
+                                AND f.part_id = %s
+                                {status_filter_sub}
+                                AND f.result = 'FAILED'
+                                AND f.metadata IS NOT NULL
+                                AND f.metadata >= 0
+                            )
+                            -- Verificar que NO hay PASS posterior
+                            AND NOT EXISTS (
+                                SELECT 1 
+                                FROM {table} u
+                                WHERE u.description = t.description
+                                AND u.part_id = %s
+                                {status_filter_sub.replace('t.', 'u.') if status_column else ''}
+                                AND u.result = 'PASSED'
+                                AND u.{id_column} > t.{id_column}
+                            )
+                            -- Verificar que es el FAILED más RECIENTE con ese reintento
+                            AND NOT EXISTS (
+                                SELECT 1 
+                                FROM {table} u2
+                                WHERE u2.description = t.description
+                                AND u2.part_id = %s
+                                {status_filter_sub.replace('t.', 'u2.') if status_column else ''}
+                                AND u2.result = 'FAILED'
+                                AND u2.metadata = t.metadata
+                                AND u2.{id_column} > t.{id_column}
+                            )
+                        )
+                    )
+                    ORDER BY t.{id_column}
+                '''
+
+                cursor.execute(sql, (part_id, part_id, part_id, part_id, part_id))
+                results = cursor.fetchall()
+                logging.info(f"✅ _get_last_records para {table}: {len(results)} registros encontrados")
+                return results
+                
+    except Exception as e:
+        logging.error(f"❌ Error en _get_last_records para {table}: {e}")
+        return []
+
+def inspection_data_st60(part_id):
+    """Obtiene datos de inspección"""
+    return _get_last_records('parameters_inspection', part_id, '*', 'parameters_inspection_id', 'status_id')
+
+def screwing_data_st60(part_id):
+    """Obtiene datos de screwing"""
+    return _get_last_records('parameters_screwing', part_id, '*', 'parameters_screwing_id', 'status_id')
+
+def pressfit_data_st60(part_id):
+    """Obtiene datos de pressfit"""
+    return _get_last_records('parameters_pressfit', part_id, '*', 'parameters_pressfit_id', None)
+
+def continuity_data_st60(part_id):
+    """Obtiene datos de continuidad"""
+    return _get_last_records('parameters_continuty', part_id, '*', 'parameters_continuity_id', 'status_status_id')
+
+def electrical_data_st60(part_id):
+    """Obtiene datos eléctricos"""
+    return _get_last_records('parameters_electrical', part_id, '*', 'parameters_electrical_id', 'status_id')
+
+############################################################################################################################################
+def cambio_status(name_piece):
+    try:
+        # Desactivar piezas anteriores
+        cursor = conn.cursor()
+        cursor.execute("UPDATE part SET status_id = ? WHERE status_id = ? AND part_number = ?", (2, 3, name_piece))
+        conn.commit()
+        cursor.close()
+    except Exception as e:
+        print(f"[ERROR] cambio_status(): {e}")
+        return "FAILED"
+    
+############################################################################################################################################
+####################################################### CÓDIGOS DE DEFECTO ##########################################################################
+
+def select_defect_combination():
+    """
+    Obtiene todas las combinaciones registradas en defect_combination.
+    Retorna lista de tuplas:
+    (combination_id, torque_state, angulo_state, rundown_state, defect_code, description)
+    """
+    try:
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        sql = """
+            SELECT combination_id, torque_state, angulo_state,
+                   rundown_state, defect_code, description
+            FROM defect_combination
+            ORDER BY combination_id ASC
+        """
+        cursor.execute(sql)
+        registros = cursor.fetchall()
+
+        cursor.close()
+        conn_local.close()
+        return registros
+    except Exception as e:
+        print(f"Error en select_defect_combination: {e}")
+        return []
+
+
+def obtener_defecto_por_combinacion(torque_state, angulo_state, rundown_state,
+                                     defect_code_default="ME99"):
+    """
+    Consulta la tabla defect_combination para obtener el código
+    según el estado de las 3 pruebas de screwing.
+
+    Parámetros:
+        torque_state   -> 'ALTO' | 'BAJO' | 'BUENO'
+        angulo_state   -> 'ALTO' | 'BAJO' | 'BUENO'
+        rundown_state  -> 'ALTO' | 'BAJO' | 'BUENO'
+
+    Si no encuentra la combinación, devuelve defect_code_default.
+    """
+    try:
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        sql = """
+            SELECT defect_code
+            FROM defect_combination
+            WHERE torque_state  = ?
+              AND angulo_state  = ?
+              AND rundown_state = ?
+            LIMIT 1
+        """
+        cursor.execute(sql, (torque_state, angulo_state, rundown_state))
+        row = cursor.fetchone()
+
+        cursor.close()
+        conn_local.close()
+
+        return row[0] if row else defect_code_default
+    except Exception as e:
+        print(f"Error en obtener_defecto_por_combinacion: {e}")
+        return defect_code_default
+
+
+def insert_defect_combination(torque_state, angulo_state, rundown_state,
+                              defect_code, description=""):
+    """Inserta una nueva combinación en defect_combination. Retorna el ID generado."""
+    try:
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        sql = """
+            INSERT INTO defect_combination
+                (torque_state, angulo_state, rundown_state, defect_code, description)
+            VALUES (?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (torque_state, angulo_state, rundown_state,
+                             defect_code, description))
+        conn_local.commit()
+        new_id = cursor.lastrowid
+
+        cursor.close()
+        conn_local.close()
+        return new_id
+    except Exception as e:
+        print(f"Error en insert_defect_combination: {e}")
+        return None
+
+
+def update_defect_combination(combination_id, torque_state, angulo_state,
+                              rundown_state, defect_code, description=""):
+    """Actualiza una combinación existente por ID."""
+    try:
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        sql = """
+            UPDATE defect_combination
+            SET torque_state  = ?,
+                angulo_state  = ?,
+                rundown_state = ?,
+                defect_code   = ?,
+                description   = ?
+            WHERE combination_id = ?
+        """
+        cursor.execute(sql, (torque_state, angulo_state, rundown_state,
+                             defect_code, description, combination_id))
+        conn_local.commit()
+
+        cursor.close()
+        conn_local.close()
+        return True
+    except Exception as e:
+        print(f"Error en update_defect_combination: {e}")
+        return False
+
+
+def delete_defect_combination(combination_id):
+    """Elimina una combinación por ID."""
+    try:
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        cursor.execute(
+            "DELETE FROM defect_combination WHERE combination_id = ?",
+            (combination_id,)
+        )
+        conn_local.commit()
+
+        cursor.close()
+        conn_local.close()
+        return True
+    except Exception as e:
+        print(f"Error en delete_defect_combination: {e}")
+        return False
+
+
+def registrar_combinacion_desconocida(torque_state, angulo_state, rundown_state,
+                                       serial_padre, part_id):
+    """
+    Registra en auditoría las combinaciones no encontradas en defect_combination.
+    Útil para detectar qué combinaciones nuevas aparecen en producción.
+    """
+    try:
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        sql = """
+            INSERT INTO defect_combination
+                (torque_state, angulo_state, rundown_state, serial_padre, part_id)
+            VALUES (?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (torque_state, angulo_state, rundown_state,
+                             serial_padre, part_id))
+        conn_local.commit()
+
+        cursor.close()
+        conn_local.close()
+        return True
+    except Exception as e:
+        print(f"Error en registrar_combinacion_desconocida: {e}")
+        return False
+
+
+def select_defect_combination_unknown(limite=100):
+    """
+    Obtiene las combinaciones desconocidas registradas en auditoría.
+    Útil para revisar qué combinaciones nuevas aparecieron en producción.
+    """
+    try:
+        conn_local = get_connection()
+        cursor = conn_local.cursor()
+
+        sql = """
+            SELECT id, torque_state, angulo_state, rundown_state,
+                   serial_padre, part_id, detected_at
+            FROM defect_combination
+            ORDER BY id DESC
+            LIMIT ?
+        """
+        cursor.execute(sql, (limite,))
+        registros = cursor.fetchall()
+
+        cursor.close()
+        conn_local.close()
+        return registros
+    except Exception as e:
+        print(f"Error en select_defect_combination: {e}")
+        return []
+
 ############################################################################################################################################
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
