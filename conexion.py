@@ -2897,6 +2897,63 @@ def insert_configuratorst50_80(machine_id, operator, model_id, process_name, sho
         if conn: conn.rollback()
         raise Exception(f"Fallo al insertar configuración inicial: {e}")
 
+############################Config urls v2 #####################################################################
+def select_api_configs_st50_80_v2():
+
+    try:
+        conn   = get_connection()
+        cursor = conn.cursor()
+        sql = "SELECT url_data_id, tc_id, name, url_data FROM url_data ORDER BY url_data_id ASC"
+        cursor.execute(sql)
+        rows = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        return rows
+    except Exception as e:
+        print(f"Error en select_api_configs_st50_80_v2: {e}")
+        return "FAILED"
+
+def update_api_by_name_st50_80_v2(api_name, nueva_url):
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            UPDATE url_data 
+            SET url_data = ? 
+            WHERE name = ?
+        """
+        cursor.execute(sql, (nueva_url, api_name))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al actualizar URL de la API {api_name}: {e}")
+    
+def insert_api_by_name_st50_80_v2(api_name, url_data):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            INSERT INTO url_data (name, url_data)
+            VALUES (?, ?)
+        """
+        cursor.execute(sql, (api_name, url_data))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al registrar la API {api_name}: {e}")
+
 # ===================== Configurador items ST40 (Tabla 2.2 - 9 campos) =====================
 def configurador_st40():
     """Lee los 9 items de configuración de ST40 (Tabla 2.2 del PDF).
