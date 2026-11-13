@@ -2896,6 +2896,84 @@ def insert_configuratorst50_80(machine_id, operator, model_id, process_name, sho
     except Exception as e:
         if conn: conn.rollback()
         raise Exception(f"Fallo al insertar configuración inicial: {e}")
+
+################################################Configurador st80 v2 ######################################################
+def configuradorst80_v2():
+    try:
+        conn = get_connection() 
+        cursor = conn.cursor()  
+        sql = """
+            SELECT machine_id, client_id, operator, password, program_name_version,
+            process_name, station, product, shop_order, location
+            FROM configurador
+            LIMIT 1
+        """
+        cursor.execute(sql)
+        registro = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return registro
+            
+    except Exception as e:
+        print(f"Error en conexion.configuradorst50_80_v2: {e}")
+        return "FAILED"
+
+def update_configuratorst80_v2(
+    machine_id, client_id, operator, password, program_name_version,
+    process_name, station, product, shop_order, location
+):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            UPDATE configurador 
+            SET machine_id = ?,
+                client_id = ?,
+                operator = ?,
+                password = ?,
+                program_name_version = ?,
+                process_name = ?,
+                station = ?,
+                product = ?,
+                shop_order = ?,
+                location = ?
+        """
+        cursor.execute(sql, (
+    machine_id, client_id, operator, password, program_name_version,
+    process_name, station, product, shop_order, location
+))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Fallo en Base de Datos: {e}")
+
+def insert_configuratorst80_v2(machine_id, client_id, operator, password, program_name_version,
+    process_name, station, product, shop_order, location):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        sql = """
+            INSERT INTO configurador (machine_id, client_id, operator, password, program_name_version,
+                                      process_name, station, product, shop_order, location)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        cursor.execute(sql, (machine_id, client_id, operator, password, program_name_version,process_name, station, product, shop_order, location))
+        conn.commit()
+        print (sql)
+        
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn: conn.rollback()
+        raise Exception(f"Fallo al insertar configuración inicial: {e}")
 ################################################Configurador st50 v2 ######################################################
 def configuradorst50_v2():
     try:
