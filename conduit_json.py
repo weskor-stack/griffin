@@ -256,3 +256,95 @@ def conduit_st60_v3(serial_number, conduit_status, defect_code):
     return conduit_json
 
 # conduit_st60_v3("P1472635-61-G:SE4A22172000000",2,["DEFECTO-PRUEBA","OTRO-ERROR"])
+
+########################################## ST50 V2 ##########################################
+
+def conduit_st50_v2(serial_number):
+    configurador     = conexion.configuradorst50_v2()
+
+    machine_name    = configurador[0]          # machine_name
+    client_id       = configurador[1]          # client_id
+    operator_id     = configurador[2]          # operator_id
+    password        = configurador[3]          # password
+    dispensing_process = configurador[6]       # dispensing_process    
+    defect_code     = configurador[7]          # defect_code
+    minute_duration = configurador[8]          # minute_duration
+    move_to_location = configurador[9]         # move_to_location
+
+    conduit_json = {
+        "version":      "1.0",
+        "keep_alive":   False,
+        "refresh_unit": True,
+        "source": {
+            "workstation": {
+                "station": machine_name,
+                "type":    "location"
+            },
+            "client_id": client_id,
+            "employee":  operator_id,
+            "password":  password,
+        },
+        "transactions": [
+            {
+                "unit": {
+                    "unit_id": serial_number
+                },
+                "commands": [{
+                    "name": "RejectIfTimeExpired",
+                    "worokstation": dispensing_process,
+                    "defect_code": defect_code,
+                    "minute_duration": minute_duration,
+                    "move_to_location": move_to_location
+                }
+                ]
+
+            }
+        ]
+    }
+    #print(json.dumps(conduit_json, indent=4))
+    return conduit_json
+
+def conduit_st80_v2(serial_number):
+    configurador     = conexion.configuradorst80_v2()
+
+    machine_name    = configurador[0]          # machine_name
+    client_id       = configurador[1]          # client_id
+    operator_id     = configurador[2]          # operator_id
+    password        = configurador[3]          # password
+    dispensing_process = configurador[6]       # dispensing_process    
+    defect_code     = configurador[7]          # defect_code
+    minute_duration = configurador[8]          # minute_duration
+    move_to_location = configurador[9]         # move_to_location
+
+    conduit_json = {
+        "version":      "1.0",
+        "keep_alive":   False,
+        "refresh_unit": True,
+        "source": {
+            "workstation": {
+                "station": machine_name,
+                "type":    "location"
+            },
+            "client_id": client_id,
+            "employee":  operator_id,
+            "password":  password,
+        },
+        "transactions": [
+            {
+                "unit": {
+                    "unit_id": serial_number
+                },
+                "commands": [{
+                    "name": "RejectIfTimeExpired",
+                    "worokstation": dispensing_process,
+                    "defect_code": defect_code,
+                    "minute_duration": minute_duration,
+                    "move_to_location": move_to_location
+                }
+                ]
+
+            }
+        ]
+    }
+    print(json.dumps(conduit_json, indent=4))
+    return conduit_json
