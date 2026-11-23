@@ -35,6 +35,7 @@ import conduit_api
 
 from conduit_api import validate_time
 import urllib.parse
+import unit_api
 
 
 # --- VARIABLES GLOBALES PARA APIS DE TRAZABILIDAD ---
@@ -656,7 +657,7 @@ def worker(conn, addr):
                                 logging.info(pantalla_final)
 
                                 try:
-                                    conn.send(f"PASSED".encode('UTF-8'))
+                                    conn.send(f"PASSED, {name_piece}".encode('UTF-8'))
                                     
                                 except Exception as e:
                                     safe_insert(str(e),"red")
@@ -735,7 +736,7 @@ def worker(conn, addr):
                                 logging.info(pantalla_final)
 
                                 try:
-                                    conn.send(f"PASSED".encode('UTF-8'))
+                                    conn.send(f"PASSED, {name_piece}".encode('UTF-8'))
                                     
                                 except Exception as e:
                                     safe_insert(str(e),"red")
@@ -1133,201 +1134,144 @@ def worker(conn, addr):
                         cadena = ""
                         pieza = ""
 
-                    # case "Component":
-                    #     pieza_padre = piece_name.get()
-                    #     entry_piece.focus_set()
-                    #     clear_table_data()
-                    #     if len(option) == 3 and option[-1] == '1/':
-                    #         serial_padre = option[1].strip()
-                    #         entry_piece.configure(state=ctk.NORMAL, textvariable=piece_name)
-                    #         piece_name.set("")
-                    #         safe_insert("You can scan the part.", "green")
-                    #         green_label.configure(image=image_green_full)
-                    #         red_label.configure(image=image_red)
-                    #         try:
-                    #             start_time = time.time()
-                    #             while True:
-                    #                 name_piece = entry_piece.get().strip()
-                    #                 time.sleep(0.05)
-                    #                 elapsed_time = time.time() - start_time
-                    #                 if len(name_piece) == 0:
-                    #                     conn.settimeout(None)
-                    #                     if elapsed_time >= 240:
-                    #                         entry_piece.configure(state="readonly", textvariable=piece_name)
-                    #                         piece_name.set("")
-                    #                         safe_insert("Start the process again.")
-                    #                         try:
-                    #                             conn.send("START-AGAIN".encode('UTF-8'))
-                    #                         except Exception as e:
-                    #                             safe_insert(f"Error enviando: {e}", "red")
-                    #                         contador = 0
-                    #                         break
+                    case "Component":
+                        clear_table_data()
 
-                    #                 if len(name_piece) > 13:
-                    #                     conn.settimeout(None)
-                    #                     entry_piece.configure(state="readonly", textvariable=piece_name)
-                    #                     piece_name.set(name_piece)
-                    #                     detalle_unit = {}
-                    #                     # try:
-                    #                     #     if not serial_padre:
-                    #                     #         raise ValueError("Missing parent serial number in Component command.")
+                        cadena = ""
+                        for item in option:
+                            cadena += str(item) + ","
 
-                    #                     #     # part_number = unit_api.consultar_part_number_unit(
-                    #                     #     #     name_piece, detalle=detalle_unit,
-                    #                     #     # )
-                    #                     #     componente = conexion.component_store(
-                    #                     #     #     name_piece, part_number, serial_padre, actualizar_existente=True,
-                    #                     #     # )
-                    #                     #     if componente != "PASSED":
-                    #                     #         raise ValueError(f"Could not save component {name_piece} for parent {serial_padre}.")
-                    #                     # except Exception as e:
-                    #                     #     logging.exception("Error processing Component from PC scanner")
-                    #                     #     piece_name.set(pieza_padre)
-                    #                     #     try:
-                    #                     #         conn.sendall(b"FAILED")
-                    #                     #     except OSError as send_error:
-                    #                     #         safe_insert(f"Error enviando: {send_error}", "red")
-                    #                         # safe_insert(
-                    #                         #     f"❌ COMPONENT FAILED: {e}"
-                    #                         #     + unit_json.formatear_detalle_unit(detalle_unit),
-                    #                         #     "red",
-                    #                         # )
-                    #                         conexionBitacora.event("SPP-002", "|Command received| " + cadena + " part: " + name_piece, month, day)
-                    #                         conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
-                    #                         green_label.configure(image=image_green)
-                    #                         red_label.configure(image=image_red_full)
-                    #                         break
+                        if len(option) == 3 and option[-1] == '1/':
+                            top_level = option[1].strip()
+                            result, message, url_unit = unit_api.consultar_part_number_unit(top_level)
+                            if result == "PASSED":
+                                conexion.piece_store2(top_level, message)
+                                pantalla_final = (f"Command received -> {comando_completo},\n Command COMPONENT PASSED\n\n"
+                                                  f"[URL UNIT]: {url_unit}\n\n"
+                                                  f"[TOP LEVEL]:\n{top_level}\n\n" 
+                                                  f"[PART NUMBER]:{message}\n\n"
+                                                )
+                                conexionBitacora.event("COM-001","|Command received| "+cadena,month,day)
+                                conexionBitacora.event("CMD-F001","|Command,PASSED|",month,day)
+                                green_label.configure(image=image_green_full)
+                                red_label.configure(image=image_red)
 
-                    #                     piece = name_piece + ", PASSED"
-                    #                     try:
-                    #                         conn.sendall(piece.encode('UTF-8'))
-                    #                     except OSError as e:
-                    #                         safe_insert(f"Error enviando: {e}", "red")
-                    #                     # safe_insert(
-                    #                     #     f"Command received-> {cadena} actuator: {name_piece}\n"
-                    #                     #     f"Command COMPONENT PASSED\nPart number: {part_number}"
-                    #                     #     + unit_json.formatear_detalle_unit(detalle_unit),
-                    #                     #     "green",
-                    #                     # )
-                    #                     conexionBitacora.event("SPP-001", "|Command received| " + cadena + " actuator: " + name_piece, month, day)
-                    #                     conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
-                    #                     green_label.configure(image=image_green_full)
-                    #                     red_label.configure(image=image_red)
-                    #                     pieza = name_piece
-                    #                     entry_piece.configure(state="readonly", textvariable=piece_name)
-                    #                     piece_name.set(pieza_padre)
-                    #                     break
-                    #                 elif len(name_piece) == 0 or len(name_piece) < 14:
-                    #                     conn.settimeout(0.1)
-                    #                     try:
-                    #                         reset = conn.recv(1024)
-                    #                         conn.settimeout(None)
-                    #                         if reset:
-                    #                             reset = reset.decode('utf-8')
-                    #                             entry_piece.configure(state="readonly", textvariable=piece_name)
-                    #                             piece_name.set("")
-                    #                             try:
-                    #                                 conn.send("RESET".encode('UTF-8'))
-                    #                             except Exception as e:
-                    #                                 safe_insert(f"Error enviando: {e}", "red")
-                    #                             safe_insert("Command received-> " + cadena + " RESET PROCESS-> Command: " + reset + "\n" + "Command COMPONENT PASSED")
-                    #                             conexionBitacora.event("RP-002", "|Command received| " + reset, month, day)
-                    #                             conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
-                    #                             green_label.configure(image=image_green_full)
-                    #                             red_label.configure(image=image_red)
-                    #                             break
-                    #                     except socket.timeout:
-                    #                         pass
-                    #                     except ConnectionResetError:
-                    #                         safe_insert("Connection was forcibly closed by the remote host" + "\n" + "Connection error!" + "\n" + "Contact technical support!")
-                    #                         pass
-                    #         except TypeError as e:
-                    #             print("Error: ", e)
-                    #             logging.error(f"Connection was closed\nError: {e}\nContact technical support!")
-                    #             safe_insert(f"Connection was closed\nError: {e}\nContact technical support!", "red")
-                    #             cadena = ""
-                    #     elif len(option) == 5 and option[-1] == '1/':
-                    #         entry_piece.configure(state=ctk.NORMAL, textvariable=piece_name)
-                    #         piece_name.set("")
-                    #         green_label.configure(image=image_green_full)
-                    #         red_label.configure(image=image_red)
-                    #         name_piece = option[1].strip()
-                    #         serial_padre = option[3].strip()
-                    #         if len(name_piece) > 13:
-                    #             entry_piece.configure(state="readonly", textvariable=piece_name)
-                    #             piece_name.set(name_piece)
-                    #             detalle_unit = {}
-                    #             # try:
-                    #             #     if not serial_padre:
-                    #             #         raise ValueError("Missing parent serial number in Component command.")
+                                try:
+                                    conn.send("PASSED".encode('UTF-8'))
 
-                    #                 # part_number = unit_api.consultar_part_number_unit(
-                    #                 #     name_piece, detalle=detalle_unit,
-                    #                 # )
-                    #                 # componente = conexion.component_store(
-                    #                 #     name_piece, part_number, serial_padre, actualizar_existente=True,
-                    #                 # )
-                    #                 # if componente != "PASSED":
-                    #                 #     raise ValueError(f"Could not save component {name_piece} for parent {serial_padre}.")
-                    #             # except Exception as e:
-                    #             #     logging.exception("Error processing Component from PLC")
-                    #             #     piece_name.set(pieza_padre)
-                    #             #     try:
-                    #             #         conn.sendall(b"FAILED")
-                    #             #     except OSError as send_error:
-                    #             #         safe_insert(f"Error enviando: {send_error}", "red")
-                    #                 # safe_insert(
-                    #                 #     f"❌ COMPONENT FAILED: {e}"
-                    #                 #     + unit_json.formatear_detalle_unit(detalle_unit),
-                    #                 #     "red",
-                    #                 # )
-                    #                 # conexionBitacora.event("SPP-002", "|Command received| " + cadena + " part: " + name_piece, month, day)
-                    #                 # conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
-                    #                 # green_label.configure(image=image_green)
-                    #                 # red_label.configure(image=image_red_full)
-                    #                 # break
+                                except Exception as e:
+                                    safe_insert(str(e),"red")
+                                    logging.error(str(e))
+                                    conexionBitacora.event("SPP-002", f"Serial number: {top_level}", month, day)
+                                    conexionBitacora.event("CMD-P002", f"|Command,FAILED| Error:{e}" , month, day)
+                                    green_label.configure(image=image_green)
+                                    red_label.configure(image=image_red_full)
+                                    break
+                                safe_insert(pantalla_final, "green")
+                                logging.info(pantalla_final)
+                            else:
+                                try:
+                                    conn.send("FAILED".encode('UTF-8'))
+                                except Exception as e:
+                                    safe_insert(str(e),"red")
+                                    logging.error(str(e))
+                                    conexionBitacora.event("SPP-002", f"Serial number: {top_level}", month, day)
+                                    conexionBitacora.event("CMD-P002", f"|Command,FAILED| Error:{e}" , month, day)
+                                    green_label.configure(image=image_green)
+                                    red_label.configure(image=image_red_full)
+                                    break
+                                conexionBitacora.event("SPP-002", f"Serial number: {top_level}", month, day)
+                                conexionBitacora.event("CMD-P002", f"|Command,FAILED|" , month, day)
+                                green_label.configure(image=image_green)
+                                red_label.configure(image=image_red_full)
 
-                    #             piece = name_piece + ", PASSED"
-                    #             try:
-                    #                 conn.sendall(piece.encode('UTF-8'))
-                    #             except OSError as e:
-                    #                 safe_insert(f"Error enviando: {e}", "red")
-                    #             # safe_insert(
-                    #             #     f"Command received-> {cadena} actuator: {name_piece}\n"
-                    #             #     f"Command COMPONENT PASSED\nPart number: {part_number}"
-                    #             #     + unit_json.formatear_detalle_unit(detalle_unit),
-                    #             #     "green",
-                    #             # )
-                    #             conexionBitacora.event("SPP-001", "|Command received| " + cadena + " actuator: " + name_piece, month, day)
-                    #             conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
-                    #             green_label.configure(image=image_green_full)
-                    #             red_label.configure(image=image_red)
-                    #             entry_piece.configure(state="readonly", textvariable=piece_name)
-                    #             piece_name.set(pieza_padre)
-                    #             pieza = name_piece
-                    #         else:
-                    #             conn.settimeout(None)
-                    #             entry_piece.configure(state="readonly", textvariable=piece_name)
-                    #             piece_name.set("")
-                    #             safe_insert("Command received-> " + cadena + " part: " + name_piece + "\n" + "Command FAILED")
-                    #             try:
-                    #                 conn.send("FAILED".encode('UTF-8'))
-                    #                 conn.send("verify data".encode('UTF-8'))
-                    #             except Exception as e:
-                    #                 safe_insert(f"Error enviando: {e}", "red")
-                    #             conexionBitacora.event("SPP-002", "|Command received| " + cadena + " part: " + name_piece, month, day)
-                    #             conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
-                    #             green_label.configure(image=image_green)
-                    #             red_label.configure(image=image_red_full)
-                    #             break
-                    #     else:
-                    #         conn.send("FAILED".encode('UTF-8'))
-                    #         safe_insert("Command received-> " + cadena + "\n" + "Command FAILED", "red")
-                    #         conexionBitacora.event("SPP-002", "|Command received| " + cadena, month, day)
-                    #         conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
-                    #         green_label.configure(image=image_green)
-                    #         red_label.configure(image=image_red_full)
-                    #         cadena = ""
+                                pantalla_final = (f"Command received -> {comando_completo}\n Command COMPONENT FAILED\n\n"
+                                                f"[URL UNIT]: {url_unit}\n\n"
+                                                f"[TOP LEVEL]:\n{top_level}\n\n" 
+                                                f"[MESSAGE]:{message}\n\n"
+                                                )
+
+                                safe_insert(pantalla_final, "red")
+                                logging.info(pantalla_final)
+                                    
+                        elif len(option) == 4 and option[-1] == '1/':
+                            top_level = option[1].strip()
+
+                            pcb = option[2].strip()
+
+                            result, message, url_unit = unit_api.consultar_part_number_unit(pcb)
+
+                            if result == "PASSED":
+                                conexion.component_store(pcb, message, top_level)
+                                pantalla_final = (f"Command received -> {comando_completo},\n Command COMPONENT PASSED\n\n"
+                                                    f"[URL UNIT]: {url_unit}\n\n"
+                                                    f"[TOP LEVEL]:\n{top_level}\n\n"
+                                                    f"[PCB]:\n{pcb}\n\n" 
+                                                    f"[PART NUMBER PCB]:\n{message}\n\n"
+                                                )
+                                
+                                conexionBitacora.event("COM-001","|Command received| "+cadena,month,day)
+                                conexionBitacora.event("CMD-F001","|Command,PASSED|",month,day)
+                                green_label.configure(image=image_green_full)
+                                red_label.configure(image=image_red)
+
+                                try:
+                                    conn.send("PASSED".encode('UTF-8'))
+
+                                except Exception as e:
+                                    safe_insert(str(e),"red")
+                                    logging.error(str(e))
+                                    conexionBitacora.event("SPP-002", f"Serial number: {top_level}", month, day)
+                                    conexionBitacora.event("CMD-P002", f"|Command,FAILED| Error:{e}" , month, day)
+                                    green_label.configure(image=image_green)
+                                    red_label.configure(image=image_red_full)
+                                    break
+                                safe_insert(pantalla_final, "green")
+                                logging.info(pantalla_final)
+                            else:
+                                try:
+                                    conn.send("FAILED".encode('UTF-8'))
+                                except Exception as e:
+                                    safe_insert(str(e),"red")
+                                    logging.error(str(e))
+                                    conexionBitacora.event("SPP-002", f"Serial number: {top_level}", month, day)
+                                    conexionBitacora.event("CMD-P002", f"|Command,FAILED| Error:{e}" , month, day)
+                                    green_label.configure(image=image_green)
+                                    red_label.configure(image=image_red_full)
+                                    break
+                                conexionBitacora.event("SPP-002", f"Serial number: {top_level}", month, day)
+                                conexionBitacora.event("CMD-P002", f"|Command,FAILED|" , month, day)
+                                green_label.configure(image=image_green)
+                                red_label.configure(image=image_red_full)
+
+                                pantalla_final = (f"Command received -> {comando_completo}\n Command COMPONENT FAILED\n\n"
+                                                f"[URL UNIT]: {url_unit}\n\n"
+                                                f"[TOP LEVEL]:\n{top_level}\n\n"
+                                                f"[PCB]:\n{pcb}\n\n" 
+                                                f"[MESSAGE]:{message}\n\n"
+                                                )
+
+                                safe_insert(pantalla_final, "red")
+                                logging.info(pantalla_final)
+                        else:
+                            try:
+                                conn.send("FAILED".encode('UTF-8'))
+                                safe_insert("Command received-> " + cadena + "\n" + "Command FAILED", "red")
+                                conexionBitacora.event("SPP-002", "|Command received| " + cadena, month, day)
+                                conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
+                                green_label.configure(image=image_green)
+                                red_label.configure(image=image_red_full)
+                                cadena = ""
+                                
+                            except Exception as e:
+                                safe_insert(str(e),"red")
+                                logging.error(str(e))
+                                conexionBitacora.event("SPP-002", f"Serial number: {top_level}", month, day)
+                                conexionBitacora.event("CMD-P002", f"|Command,FAILED| Error:{e}" , month, day)
+                                green_label.configure(image=image_green)
+                                red_label.configure(image=image_red_full)
+                                break
+
                     case "laser":
                         serial = conexion.get_part_numbers('P2173404-00-C:SEYU26061A0765')
                         if serial != "PASSED":
