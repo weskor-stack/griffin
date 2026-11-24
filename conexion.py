@@ -4479,6 +4479,19 @@ def select_defect_combination_unknown(limite=100):
         return []
 
 ############################################################################################################################################
+def serial_number_component(parte):
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT part_id, part_number,description, model_id, create_registration FROM part WHERE status_id = 3 AND part_number = %s ORDER BY part_id DESC LIMIT 1",(parte,))
+            part = cursor.fetchone()
+            if not part:
+                return None  # O podrías lanzar una excepción si prefieres
+
+            return part
+
+    except Exception as e:
+        print(f"[ERROR] serial_number(): {e}")
+        return None
 
 # name = "P1895152-00-G:SHG2242791000290"
 # parameters_pressfit(['F', '50', '10', '100', 'Numeric', 'N', 'PASSED', 'Comentarios', 'dwell_time'],name)
