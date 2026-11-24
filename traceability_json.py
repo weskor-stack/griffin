@@ -2377,32 +2377,26 @@ def traceability_station_50_v2(serial_padre):
 
     return (payload)
     
-def traceability_station_80_v2(serial_padre, defect_code_default=""):
-    config_local = conexion.configuradorst80()
+def traceability_station_80_v2(serial_padre):
+    config_local = conexion.configuradorst50_v2()
     parte = conexion.obtener_parte2(serial_padre)
-    
-    if config_local and config_local != "FAILED":
-        machine_id = str(config_local[0]).strip()
-        operator_id = str(config_local[1]).strip()
-        process_name = str(config_local[3]).strip()
-        component_name_db = str(config_local[4]).strip()
-        program_version = str(config_local[2]).strip()
-    else:
-        machine_id = "AMC-GENLD97"
-        operator_id = "9999"
-        process_name = "Pressfit"
-        component_name_db = "component"
-        program_version = "default_program"
+    component = conexion.component_data(parte[0])
+
+    machine_id = str(config_local[0]).strip()
+    operator_id = str(config_local[2]).strip()
+    process_name = str(config_local[5]).strip()
+    part_number = str(parte[4]).strip()
+    program_version = str(config_local[4]).strip()
 
     now = datetime.now(ZoneInfo("America/Mexico_City"))
-    now_utc = now.strftime("%d/%m/%Y %I:%M:%S %p")
+    now_utc = now.strftime("%m/%d/%Y %I:%M:%S %p")
     fecha = str(parte[3])
 
     # Convertir la cadena a datetime
-    fecha_dt = datetime.strptime(fecha, "%Y/%m/%d %H:%M:%S")
+    fecha_dt = datetime.strptime(fecha, "%Y-%m-%d %H:%M:%S")
 
     # Dar el formato deseado
-    fecha_formateada = fecha_dt.strftime("%d/%m/%Y %I:%M:%S %p")
+    fecha_formateada = fecha_dt.strftime("%m/%d/%Y %I:%M:%S %p")
     
     atributos = conexion.select_attributes_st50_80()
     atributos_map = {}
@@ -2457,8 +2451,13 @@ def traceability_station_80_v2(serial_padre, defect_code_default=""):
             lim_sup = float(row[3]) if row[3] is not None else 0.0
             unidad = str(row[5]) if row[5] is not None else ""
             status_step = str(row[6]).upper() if row[6] is not None else "PASSED"
-            name_step = str(row[9]) if row[9] is not None else "Measurement"
-            desc_step = str(row[9]) if row[9] is not None else "Description"
+            
+            if test_source == 'inspection':
+                name_step = str(row[7]).strip() if row[7] is not None else "Inspection_Step"
+            else:
+                name_step = str(row[11]).strip() if row[11] is not None else "Measurement"
+                
+            desc_step = name_step
             
         except Exception:
             continue
@@ -2466,8 +2465,8 @@ def traceability_station_80_v2(serial_padre, defect_code_default=""):
         if status_step == "FAILED":
             global_status = "FAILED"
             
-            defect_code_low = defect_code_default
-            defect_code_high = defect_code_default
+            defect_code_low = ""
+            defect_code_high = ""
             
             source_to_attribute = {
                 'screwing': 'SCREWING',
@@ -2487,11 +2486,11 @@ def traceability_station_80_v2(serial_padre, defect_code_default=""):
                     defect_code_high = atributos_map[name_step.lower()]['defect_code_high']
             
             if val_medido < lim_inf:
-                step_defect = defect_code_low if defect_code_low else defect_code_default
+                step_defect = defect_code_low if defect_code_low else ""
             elif val_medido > lim_sup:
-                step_defect = defect_code_high if defect_code_high else defect_code_default
+                step_defect = defect_code_high if defect_code_high else ""
             else:
-                step_defect = defect_code_high if defect_code_high else (defect_code_low if defect_code_low else defect_code_default)
+                step_defect = defect_code_high if defect_code_high else (defect_code_low if defect_code_low else "")
         else:
             step_defect = ""
 
@@ -2509,9 +2508,33 @@ def traceability_station_80_v2(serial_padre, defect_code_default=""):
 
     program_version = str(program_version).strip() if program_version else "default_program"
 
+    commands = []
+    commands.append(
+        {
+            "command": "ReplaceNontrackedComponent",
+            "ref_designator": f"{process_name}_Station ID",
+            "component_id": machine_id     
+        }
+    )
+    commands.append(
+        {
+            "command": "ReplaceNontrackedComponent",
+            "ref_designator": f"{process_name}_Program Name Version",
+            "component_id": program_version   
+        }
+    )
+
+    for x in component:
+        valor = x[1]
+        commands.append({
+            "command":"ReplaceTrackedComponent",
+            "ref_designator":f"{process_name}_Drip Case",
+            "component_id": valor
+        })
+
     payload = {
         "serial": serial_padre,
-        "product": parte[4],
+        "product": part_number,
         "station": machine_id,
         "operator": operator_id,
         "start_time": fecha_formateada,
@@ -2521,21 +2544,11 @@ def traceability_station_80_v2(serial_padre, defect_code_default=""):
         "test_steps": {
             "STEPS LIST": steps_list
         },
-        "commands": [
-            {
-                "command": "ReplaceNontrackedComponent",
-                "ref_designator": f"{process_name}_Station ID",
-                "component_id": machine_id
-            },
-            {
-                "command": "ReplaceNontrackedComponent",
-                "ref_designator": f"{process_name}_Program ID",
-                "component_id": program_version   
-            }
-        ]
+        "commands": commands
     }
+    return (payload)
 
-    return payload
+#traceability_station_80_v2("P1472635-61-G:SE4A22172000000")
 
 # datos = traceability_station_60_v3("P1472635-61-G:SE4A22172000003", 4)
 # print(json.dumps(datos[0], indent=4))

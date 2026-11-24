@@ -32,7 +32,7 @@ def get_interlocking_url():
         logging.error(f"Error obteniendo URL de INTERLOCKING: {e}")
         return None
 
-def call_interlocking_api_with_retry(serial_number=None, is_station_10=False, max_retries=None, retry_delay=None):
+def call_interlocking_api_with_retry(serial_number=None, is_station_10=True, max_retries=None, retry_delay=None):
     """
     Llama a la API de INTERLOCKING con reintentos automáticos
     
@@ -68,7 +68,13 @@ def call_interlocking_api_with_retry(serial_number=None, is_station_10=False, ma
             import interlocking_json
             
             # Obtener el JSON según el tipo de llamada
-            json_data = interlocking_json.interlocking_st50_v2(serial_number)
+            print(is_station_10)
+            if is_station_10:
+                json_data = interlocking_json.interlocking_st80_v2(serial_number)
+
+            else:
+                json_data = interlocking_json.interlocking_st50_v2(serial_number)
+
             logging.info(f"JSON: {json.dumps(json_data, indent=2, ensure_ascii=False)}")
             call_description = f"pieza: {serial_number}"
             
@@ -205,6 +211,33 @@ def validate_piece(serial_number, max_retries=None, retry_delay=None):
         logging.error(f"✗ INTERLOCKING validation FAILED for {serial_number} después de {attempts} intentos: {message} (tiempo último intento: {response_time_ms} ms)")
         return False, message, response_data, attempts, response_time_ms, json_data, succes_data
 
-# result, message, response_data, reintentos, respuesta, json_data =validate_piece("P1472635-61-G:SE4A22172000000", MAX_RETRIES, RETRY_DELAY)
+def validate_piece_st80_v2(serial_number, max_retries=None, retry_delay=None):
+    """
+    Valida una pieza con la API de INTERLOCKING usando estructura genérica
+    (Para estaciones que NO son la ST10)
+    
+    Args:
+        serial_number (str): Número de serie a validar
+        max_retries (int, optional): Máximo número de reintentos
+        retry_delay (int, optional): Segundos entre reintentos
+    
+    Returns:
+        tuple: (is_valid, message, attempts, response_time_ms)
+    """
+    success, message, response_data, status_code, attempts, response_time_ms, json_data, succes_data = call_interlocking_api_with_retry(
+        serial_number=serial_number,
+        is_station_10=True,
+        max_retries=max_retries,
+        retry_delay=retry_delay
+    )
+    
+    if success:
+        logging.info(f"✓ INTERLOCKING validation PASSED for {serial_number} (intentos: {attempts}, tiempo: {response_time_ms} ms)")
+        return True, message, response_data, attempts, response_time_ms, json_data, succes_data
+    else:
+        logging.error(f"✗ INTERLOCKING validation FAILED for {serial_number} después de {attempts} intentos: {message} (tiempo último intento: {response_time_ms} ms)")
+        return False, message, response_data, attempts, response_time_ms, json_data, succes_data
 
-# print(f"Resultado: {result}\n", f"message:{message}\n", f"response:{response_data}\n",f"Reintentos:{reintentos}\n", f"Respuesta:{respuesta}\n", f"JSON:{json_data}")
+# result, message, response_data, reintentos, respuesta, json_data, succes_data =validate_piece_st80_v2("P1472635-61-G:SE4A22172000000", MAX_RETRIES, RETRY_DELAY)
+
+# print(f"Resultado: {result}\n", f"message:{message}\n", f"response:{response_data}\n",f"Reintentos:{reintentos}\n", f"Respuesta:{respuesta}\n", f"JSON:{json.dumps(json_data, indent=4)}")
