@@ -36,6 +36,7 @@ import conduit_api
 from conduit_api import validate_time
 import urllib.parse
 import unit_api
+import interlocking_api
 
 
 # --- VARIABLES GLOBALES PARA APIS DE TRAZABILIDAD ---
@@ -1262,11 +1263,83 @@ def worker(conn, addr):
                                 green_label.configure(image=image_green)
                                 red_label.configure(image=image_red_full)
                                 cadena = ""
-                                
+
                             except Exception as e:
                                 safe_insert(str(e),"red")
                                 logging.error(str(e))
                                 conexionBitacora.event("SPP-002", f"Serial number: {top_level}", month, day)
+                                conexionBitacora.event("CMD-P002", f"|Command,FAILED| Error:{e}" , month, day)
+                                green_label.configure(image=image_green)
+                                red_label.configure(image=image_red_full)
+                                break
+
+                    case "interlocking":
+                        if len(option) == 3 and option[-1] == "1/":
+                            safe_insert("🔗 Dispatching validation schema to Interlocking...", "blue")
+
+                            top_level = option[1]
+                            result, message, response_data, reintentos, respuesta, json_data, succes_data =interlocking_api.validate_piece(top_level, 5, 2)
+                            if succes_data == "true":
+                                try:
+                                    conn.send("PASSED".encode('UTF-8'))
+                                except Exception as e:
+                                    safe_insert(str(e),"red")
+                                    logging.error(str(e))
+                                    conexionBitacora.event("INT-002", f"Serial number: {top_level}", month, day)
+                                    conexionBitacora.event("CMD-P002", f"|Command,FAILED| Error:{e}" , month, day)
+                                    green_label.configure(image=image_green)
+                                    red_label.configure(image=image_red_full)
+                                    break
+                                pantalla_final = (f"Command received -> {comando_completo}\n Command INTERLOCKING PASSED\n\n"
+                                                f"[INTERLOCKING REQUEST]:\n {json.dumps(json_data, indent=4 )}\n\n"
+                                                f"[INTERLOCKING RESPONSE]:\n {json.dumps(response_data, indent=4 )}\n\n"
+                                                )
+                                safe_insert(pantalla_final, "green")
+                                logging.info(pantalla_final)
+                                conexionBitacora.event("INT-001","|Command received| "+cadena,month,day)
+                                conexionBitacora.event("CMD-F001","|Command,PASSED|",month,day)
+                                green_label.configure(image=image_green_full)
+                                red_label.configure(image=image_red)
+                            else:
+                                try:
+                                    pantalla_final = (f"Command received -> {comando_completo}\n Command INTERLOCKING FAILED\n\n"
+                                                    f"[INTERLOCKING REQUEST]:\n {json.dumps(json_data, indent=4 )}\n\n"
+                                                    f"[INTERLOCKING RESPONSE]:\n {json.dumps(response_data, indent=4 )}\n\n"
+                                                    )
+                                    conn.send("FAILED".encode('UTF-8'))
+                                    safe_insert(pantalla_final, "red")
+                                    logging.error(pantalla_final)
+                                    conexionBitacora.event("INT-002", "|Command received| " + cadena, month, day)
+                                    conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
+                                    green_label.configure(image=image_green)
+                                    red_label.configure(image=image_red_full)
+                                    cadena = ""
+
+                                except Exception as e:     
+                                        
+                                        safe_insert(str(e),"red")
+                                        logging.error(str(e))
+                                        conexionBitacora.event("INT-002", f"Serial number: {top_level}", month, day)
+                                        conexionBitacora.event("CMD-P002", f"|Command,FAILED| Error:{e}" , month, day)
+                                        green_label.configure(image=image_green)
+                                        red_label.configure(image=image_red_full)
+                                        break
+                                
+                        else:
+                            try:
+                                conn.send("FAILED".encode('UTF-8'))
+                                safe_insert("Command received-> " + comando_completo + "\n" + "Command FAILED", "red")
+                                logging("Command received ->" + comando_completo + "\n" + "Command FAILED")
+                                conexionBitacora.event("INT-002", "|Command received| " + cadena, month, day)
+                                conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
+                                green_label.configure(image=image_green)
+                                red_label.configure(image=image_red_full)
+                                cadena = ""
+
+                            except Exception as e:
+                                safe_insert(str(e),"red")
+                                logging.error(str(e))
+                                conexionBitacora.event("INT-002", f"Serial number: {top_level}", month, day)
                                 conexionBitacora.event("CMD-P002", f"|Command,FAILED| Error:{e}" , month, day)
                                 green_label.configure(image=image_green)
                                 red_label.configure(image=image_red_full)

@@ -52,9 +52,9 @@ def call_interlocking_api_with_retry(serial_number=None, is_station_10=False, ma
     interlocking_url = get_interlocking_url()
     
     if not interlocking_url:
-        error_msg = "No se ha configurado la URL de INTERLOCKING en la base de datos"
+        error_msg = "The INTERLOCKING URL has not been configured in the database"
         logging.error(error_msg)
-        return False, error_msg, None, None, 0, 0
+        return False, error_msg, None, None, 0, 0,None,None
     
     attempts = 0
     last_error = None
@@ -68,14 +68,9 @@ def call_interlocking_api_with_retry(serial_number=None, is_station_10=False, ma
             import interlocking_json
             
             # Obtener el JSON según el tipo de llamada
-            if is_station_10:
-                json_data = interlocking_json.interlocking_station_10()
-                logging.info(f"JSON: {json.dumps(json_data, indent=2, ensure_ascii=False)}")
-                call_description = "Station 10"
-            else:
-                json_data = interlocking_json.interlocking_station(serial_number)
-                logging.info(f"JSON: {json.dumps(json_data, indent=2, ensure_ascii=False)}")
-                call_description = f"pieza: {serial_number}"
+            json_data = interlocking_json.interlocking_st50_v2(serial_number)
+            logging.info(f"JSON: {json.dumps(json_data, indent=2, ensure_ascii=False)}")
+            call_description = f"pieza: {serial_number}"
             
             # Validar que el JSON no sea un string de error
             if isinstance(json_data, str) and "Error" in json_data:
@@ -113,6 +108,8 @@ def call_interlocking_api_with_retry(serial_number=None, is_station_10=False, ma
             # Logging con tiempo de respuesta
             logging.info(f"API INTERLOCKING respondió con código {response.status_code} (intento {attempt}) - Tiempo respuesta: {response_time_ms} ms")
             logging.debug(f"Respuesta: {json.dumps(response_data, indent=2, ensure_ascii=False) if response_data else 'No data'}")
+
+            succes_data = ''
             
             # Evaluar si la respuesta fue exitosa (códigos 200-599)
             if 200 <= response.status_code < 600:
@@ -126,8 +123,9 @@ def call_interlocking_api_with_retry(serial_number=None, is_station_10=False, ma
                         is_valid = False
                 
                 if is_valid:
+                    succes_data = response_data.get('success')
                     logging.info(f"✅ API INTERLOCKING exitosa en intento {attempt} para {call_description} - Tiempo: {response_time_ms} ms")
-                    return True, "API call successful", response_data, response.status_code, attempts, response_time_ms
+                    return True, "API call successful", response_data, response.status_code, attempts, response_time_ms, json_data, succes_data
                 else:
                     error_msg = "API returned invalid status"
                     logging.warning(f"{error_msg} para {call_description} - Tiempo: {response_time_ms} ms")
@@ -178,7 +176,7 @@ def call_interlocking_api_with_retry(serial_number=None, is_station_10=False, ma
     
     final_error = f"Todos los {max_retries} intentos fallaron. Último error: {last_error}"
     logging.error(final_error)
-    return False, final_error, None, None, attempts, 0
+    return False, final_error, None, None, attempts, 0, json_data
 
 def validate_piece(serial_number, max_retries=None, retry_delay=None):
     """
@@ -193,7 +191,7 @@ def validate_piece(serial_number, max_retries=None, retry_delay=None):
     Returns:
         tuple: (is_valid, message, attempts, response_time_ms)
     """
-    success, message, response_data, status_code, attempts, response_time_ms = call_interlocking_api_with_retry(
+    success, message, response_data, status_code, attempts, response_time_ms, json_data, succes_data = call_interlocking_api_with_retry(
         serial_number=serial_number,
         is_station_10=False,
         max_retries=max_retries,
@@ -202,29 +200,11 @@ def validate_piece(serial_number, max_retries=None, retry_delay=None):
     
     if success:
         logging.info(f"✓ INTERLOCKING validation PASSED for {serial_number} (intentos: {attempts}, tiempo: {response_time_ms} ms)")
-        return True, message, response_data, attempts, response_time_ms
+        return True, message, response_data, attempts, response_time_ms, json_data, succes_data
     else:
         logging.error(f"✗ INTERLOCKING validation FAILED for {serial_number} después de {attempts} intentos: {message} (tiempo último intento: {response_time_ms} ms)")
-        return False, message, response_data, attempts, response_time_ms
+        return False, message, response_data, attempts, response_time_ms, json_data, succes_data
 
-def validate_station_10(max_retries=None, retry_delay=None):
-    """
-    Valida la estación 10 con la API de INTERLOCKING usando estructura específica
-    (Para la estación ST10 - Laser)
-    
-    Returns:
-        tuple: (is_valid, message, attempts, response_time_ms)
-    """
-    success, message, response_data, status_code, attempts, response_time_ms = call_interlocking_api_with_retry(
-        serial_number=None,
-        is_station_10=True,
-        max_retries=max_retries,
-        retry_delay=retry_delay
-    )
-    
-    if success:
-        logging.info(f"✓ INTERLOCKING Station 10 validation PASSED (intentos: {attempts}, tiempo: {response_time_ms} ms)\nresponse_data:{response_data}")
-        return True, message, response_data, attempts, response_time_ms
-    else:
-        logging.error(f"✗ INTERLOCKING Station 10 validation FAILED después de {attempts} intentos: {message} (tiempo último intento: {response_time_ms} ms)")
-        return False, message, response_data, attempts, response_time_ms
+# result, message, response_data, reintentos, respuesta, json_data =validate_piece("P1472635-61-G:SE4A22172000000", MAX_RETRIES, RETRY_DELAY)
+
+# print(f"Resultado: {result}\n", f"message:{message}\n", f"response:{response_data}\n",f"Reintentos:{reintentos}\n", f"Respuesta:{respuesta}\n", f"JSON:{json_data}")
