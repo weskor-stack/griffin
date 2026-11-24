@@ -844,22 +844,18 @@ def worker(conn, addr):
                         
                         if len(option) == 6 and option[-1] == '1/':
                             duration = conexion.duration(cadena, option[4])
+                            cambio_status = conexion.cambio_status(option[4])
 
                             if duration == "PASSED":
                                 try:
                                     url_data = conexion.obtener_url_api()
                                     print(url_data)
 
-                                    url_traceability = url_data[2][0]
+                                    url_traceability = url_data[3][0]
                                     print(f"URL Traceability: {url_traceability}")
 
-                                    traceability_payload = traceability_json.traceability_station_50_80(
-                                        option[4], 
-                                        SERIAL_PADRE_GLOBAL,
-                                        PART_NUMBER,
-                                        COMPONENT,
-                                        component_sn,       
-                                        ""
+                                    traceability_payload = traceability_json.traceability_station_50_v2(
+                                        option[4]
                                     )
 
                                     response_traceability = requests.post(
@@ -897,88 +893,29 @@ def worker(conn, addr):
                                     safe_insert(pantalla_end, "green")
 
                                 except Exception as err_trace:
+                                    conn.send("FAILED, TRACEABILITY OFFLINE".encode('UTF-8'))
                                     logging.error(f"Error executing traceability dispatch: {err_trace}")
                                     safe_insert(f"Traceability Network Error: {str(err_trace)}", "red")
-                                    conn.send("FAILED, TRACEABILITY OFFLINE".encode('UTF-8'))
+                                    conexionBitacora.event("ENDP-002","|Command received| "+cadena,month,day)
+                                    conexionBitacora.event("CMD-F002","|Command,FAILED|",month,day)
+                                    green_label.configure(image=image_green)
+                                    red_label.configure(image=image_red_full)
                                     cadena = ""
                                     continue
 
                                 try:
                                     conn.send("PASSED".encode('UTF-8'))
+                                    conexionBitacora.event("ENDP-001","|Command received| "+cadena,month,day)
+                                    conexionBitacora.event("CMD-F001","|Command,PASSED|",month,day)
+                                    green_label.configure(image=image_green_full)
+                                    red_label.configure(image=image_red)
+
                                 except Exception as e:
                                     safe_insert(f"Error enviando: {e}", "red")
-
-                                enabled_formats = conexion.get_enabled_export_formats()
-                                json_result = None
-                                csv_result = None
-                                xml_result = None
-                                any_file_created = False
-                                errors = []
-
-                                if 'CSV' in enabled_formats:
-                                    try:
-                                        import data_csv_60
-                                        file_csv = data_csv_60.csv_file()
-                                        csv_result = file_csv
-                                        if file_csv == "PASSED":
-                                            any_file_created = True
-                                        else:
-                                            errors.append(f"CSV: {file_csv}")
-                                            safe_insert(f"✗ CSV Error: {file_csv}\n", "red")
-                                    except ImportError:
-                                        errors.append("CSV: Módulo no encontrado")
-                                        safe_insert("✗ CSV module not available\n", "red")
-                                    except Exception as e:
-                                        errors.append(f"CSV: {str(e)}")
-                                        safe_insert(f"✗ CSV Exception: {str(e)}\n", "red")
-
-                                if 'XML' in enabled_formats:
-                                    try:
-                                        import data_xml
-                                        file_xml = data_xml.xml_file()
-                                        xml_result = file_xml
-                                        if file_xml == "PASSED":
-                                            any_file_created = True
-                                        else:
-                                            errors.append(f"XML: {file_xml}")
-                                            safe_insert(f"✗ XML Error: {file_xml}\n", "red")
-                                    except ImportError:
-                                        errors.append("XML: Módulo no encontrado")
-                                        safe_insert("✗ XML module not available\n", "red")
-                                    except Exception as e:
-                                        errors.append(f"XML: {str(e)}")
-                                        safe_insert(f"✗ XML Exception: {str(e)}\n", "red")
-
-                                if not enabled_formats:
-                                    safe_insert("⚠ No export formats enabled\n", "orange")
-                                    conexionBitacora.event("ENDP-003", "|No export formats enabled|", month, day)
-                                    conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
-                                    green_label.configure(image=image_green_full)
-                                    red_label.configure(image=image_red)
-                                elif errors:
-                                    error_message = "; ".join(errors)
-                                    safe_insert(f"⚠ Some files were not generated: {error_message}\n", "orange")
-                                    if any_file_created:
-                                        safe_insert("✓ At least one file was successfully generated\n")
-                                        conexionBitacora.event("ENDP-004", f"|Partial export| {error_message}", month, day)
-                                        conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
-                                        green_label.configure(image=image_green_full)
-                                        red_label.configure(image=image_red)
-                                    else:
-                                        safe_insert("✗ No file could be generated\n", "red")
-                                        try:
-                                            conn.send("FAILED".encode('UTF-8'))
-                                        except Exception as e:
-                                            safe_insert(f"Error enviando: {e}", "red")
-                                        conexionBitacora.event("ENDP-002", f"|No files created| {error_message}", month, day)
-                                        conexionBitacora.event("CMD-F001", "|Command,FAILED|", month, day)
-                                        green_label.configure(image=image_green)
-                                        red_label.configure(image=image_red_full)
-                                else:
-                                    conexionBitacora.event("ENDP-001", "|Command received| " + cadena, month, day)
-                                    conexionBitacora.event("CMD-P001", "|Command,PASSED|", month, day)
-                                    green_label.configure(image=image_green_full)
-                                    red_label.configure(image=image_red)
+                                    conexionBitacora.event("ENDP-002","|Command received| "+cadena,month,day)
+                                    conexionBitacora.event("CMD-F002","|Command,FAILED|",month,day)
+                                    green_label.configure(image=image_green)
+                                    red_label.configure(image=image_red_full)
                             else:
                                 try:
                                     conn.send("FAILED".encode('UTF-8'))
@@ -1078,49 +1015,37 @@ def worker(conn, addr):
                             cadena += str(item) + ","
                         # print(cadena)
                         if option[-1] == '1/':
-                            if len(entry_piece.get()) == 0:
-                                safe_insert("Command received-> "+cadena+"\n"+": The part has not been loaded"+"\n"+"Command FAILED"+"\n", "red")
+                                        
+                            part_name = option[-2]
+                            commit_options, table_data = commands.commit(cadena, part_name)
+                    
+                            if(commit_options == 'PASSED'):
+                                if table_data:
+                                    update_table_with_data(table_data)
+
+                                safe_insert("Command received-> "+cadena+"\n"+"Command COMMIT PASSED"+"\n")
+                                try:
+                                    conn.send("PASSED".encode('UTF-8'))
+                                except Exception as e:
+                                    safe_insert(f"Error enviando: {e}", "red")
+                                
+                                conexionBitacora.event("COM-001","|Command received| "+cadena,month,day)
+                                conexionBitacora.event("CMD-P001","|Command,PASSED|",month,day)
+
+                                green_label.configure(image=image_green_full)
+                                red_label.configure(image=image_red)
+                            else:
+                                safe_insert("Command received-> "+cadena+"\n"+"Command FAILED"+"\n", "red")
                                 try:
                                     conn.send("FAILED".encode('UTF-8'))
                                 except Exception as e:
                                     safe_insert(f"Error enviando: {e}", "red")
-                                conexionBitacora.event("CMD-C001","|Command received| "+cadena+": The part has not been loaded",month,day)
+
+                                conexionBitacora.event("COM-002","|Command received| "+cadena,month,day)
                                 conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
 
                                 green_label.configure(image=image_green)
                                 red_label.configure(image=image_red_full)
-                                        
-                            else:
-                                part_name = entry_piece.get()
-                                commit_options, table_data = commands.commit(cadena, part_name)
-                        
-                                if(commit_options == 'PASSED'):
-                                    if table_data:
-                                        update_table_with_data(table_data)
-
-                                    safe_insert("Command received-> "+cadena+"\n"+"Command COMMIT PASSED"+"\n")
-                                    try:
-                                        conn.send("PASSED".encode('UTF-8'))
-                                    except Exception as e:
-                                        safe_insert(f"Error enviando: {e}", "red")
-                                    
-                                    conexionBitacora.event("COM-001","|Command received| "+cadena,month,day)
-                                    conexionBitacora.event("CMD-P001","|Command,PASSED|",month,day)
-
-                                    green_label.configure(image=image_green_full)
-                                    red_label.configure(image=image_red)
-                                else:
-                                    safe_insert("Command received-> "+cadena+"\n"+"Command FAILED"+"\n", "red")
-                                    try:
-                                        conn.send("FAILED".encode('UTF-8'))
-                                    except Exception as e:
-                                        safe_insert(f"Error enviando: {e}", "red")
-
-                                    conexionBitacora.event("COM-002","|Command received| "+cadena,month,day)
-                                    conexionBitacora.event("CMD-F001","|Command,FAILED|",month,day)
-
-                                    green_label.configure(image=image_green)
-                                    red_label.configure(image=image_red_full)
                         else:
                             safe_insert("Command received-> "+cadena+"\n"+"Command FAILED"+"\n", "red")
                             try:

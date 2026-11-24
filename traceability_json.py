@@ -2201,6 +2201,342 @@ def traceability_station_60_v3(serial_padre, numero_tornillo):
 
     return payload, array_codigo_defecto
 
+
+############################## ST 50-80 V2 ####################
+def traceability_station_50_v2(serial_padre):
+    config_local = conexion.configuradorst50_v2()
+    parte = conexion.obtener_parte2(serial_padre)
+    component = conexion.component_data(parte[0])
+
+    machine_id = str(config_local[0]).strip()
+    operator_id = str(config_local[2]).strip()
+    process_name = str(config_local[5]).strip()
+    part_number = str(parte[4]).strip()
+    program_version = str(config_local[4]).strip()
+
+    now = datetime.now(ZoneInfo("America/Mexico_City"))
+    now_utc = now.strftime("%m/%d/%Y %I:%M:%S %p")
+    fecha = str(parte[3])
+
+    # Convertir la cadena a datetime
+    fecha_dt = datetime.strptime(fecha, "%Y-%m-%d %H:%M:%S")
+
+    # Dar el formato deseado
+    fecha_formateada = fecha_dt.strftime("%m/%d/%Y %I:%M:%S %p")
+    
+    atributos = conexion.select_attributes_st50_80()
+    atributos_map = {}
+    for attr in atributos:
+        if len(attr) >= 7:
+            nombre_atributo = str(attr[1]).lower().strip() 
+            atributos_map[nombre_atributo] = {
+                'defect_code_low': str(attr[5]).strip() if attr[5] is not None else "",   
+                'defect_code_high': str(attr[6]).strip() if attr[6] is not None else "",  
+                'name': attr[1]
+            }
+
+    part_row = conexion.pieces(serial_padre)
+    all_test_rows = []
+    
+    if part_row:
+        part_id = part_row[0]
+        
+        try:
+            sr = conexion.screwing_data(part_id)
+            if sr and isinstance(sr, list):
+                for item in sr: all_test_rows.append(item + ('screwing',))
+        except Exception: pass
+        
+        try:
+            pr = conexion.pressfit_data(part_id)
+            if pr and isinstance(pr, list):
+                for item in pr: all_test_rows.append(item + ('pressfit',))
+        except Exception: pass
+        
+        try:
+            ir = conexion.inspection_data3(part_id)
+            if ir and isinstance(ir, list):
+                for item in ir: all_test_rows.append(item + ('inspection',))
+        except Exception: pass
+        
+        try:
+            er = conexion.electrical_data(part_id)
+            if er and isinstance(er, list):
+                for item in er: all_test_rows.append(item + ('electrical',))
+        except Exception: pass
+
+    steps_list = []
+    global_status = "PASSED"
+
+    for row in all_test_rows:
+        try:
+            test_source = str(row[-1]).strip().lower() if isinstance(row[-1], str) and row[-1] in ['screwing', 'pressfit', 'inspection', 'electrical'] else ""
+            
+            val_medido = float(row[1]) if row[1] is not None else 0.0
+            lim_inf = float(row[2]) if row[2] is not None else 0.0
+            lim_sup = float(row[3]) if row[3] is not None else 0.0
+            unidad = str(row[5]) if row[5] is not None else ""
+            status_step = str(row[6]).upper() if row[6] is not None else "PASSED"
+            
+            if test_source == 'inspection':
+                name_step = str(row[7]).strip() if row[7] is not None else "Inspection_Step"
+            else:
+                name_step = str(row[11]).strip() if row[11] is not None else "Measurement"
+                
+            desc_step = name_step
+            
+        except Exception:
+            continue
+
+        if status_step == "FAILED":
+            global_status = "FAILED"
+            
+            defect_code_low = ""
+            defect_code_high = ""
+            
+            source_to_attribute = {
+                'screwing': 'SCREWING',
+                'pressfit': 'PRESSFIT', 
+                'inspection': 'INSPECTION',  
+                'electrical': 'ELECTRICAL'
+            }
+            
+            attr_name = source_to_attribute.get(test_source, name_step.upper())
+            
+            if attr_name.lower() in atributos_map:
+                defect_code_low = atributos_map[attr_name.lower()]['defect_code_low']
+                defect_code_high = atributos_map[attr_name.lower()]['defect_code_high']
+            else:
+                if name_step.lower() in atributos_map:
+                    defect_code_low = atributos_map[name_step.lower()]['defect_code_low']
+                    defect_code_high = atributos_map[name_step.lower()]['defect_code_high']
+            
+            if val_medido < lim_inf:
+                step_defect = defect_code_low if defect_code_low else ""
+            elif val_medido > lim_sup:
+                step_defect = defect_code_high if defect_code_high else ""
+            else:
+                step_defect = defect_code_high if defect_code_high else (defect_code_low if defect_code_low else "")
+        else:
+            step_defect = ""
+
+        steps_list.append({
+            "name": name_step,
+            "description": desc_step,
+            "comparator": "GELE",
+            "lowLimit": lim_inf,
+            "highLimit": lim_sup,
+            "units": unidad,
+            "status": status_step,
+            "value": val_medido,
+            "defect_code": step_defect
+        })
+
+    program_version = str(program_version).strip() if program_version else "default_program"
+
+    commands = []
+    commands.append(
+        {
+            "command": "ReplaceNontrackedComponent",
+            "ref_designator": f"{process_name}_Station ID",
+            "component_id": machine_id     
+        }
+    )
+    commands.append(
+        {
+            "command": "ReplaceNontrackedComponent",
+            "ref_designator": f"{process_name}_Program Name Version",
+            "component_id": program_version   
+        }
+    )
+    indice = 1
+
+    for x in component:
+        valor = x[1]
+        commands.append({
+            "command":"ReplaceTrackedComponent",
+            "ref_designator":f"{process_name}_PCB{indice}",
+            "component_id": valor
+        })
+        indice += 1
+
+    payload = {
+        "serial": serial_padre,
+        "product": part_number,
+        "station": machine_id,
+        "operator": operator_id,
+        "start_time": fecha_formateada,
+        "end_time": now_utc,
+        "process_name": process_name,
+        "status": global_status,
+        "test_steps": {
+            "STEPS LIST": steps_list
+        },
+        "commands": commands
+    }
+
+    return (payload)
+    
+def traceability_station_80_v2(serial_padre, defect_code_default=""):
+    config_local = conexion.configuradorst80()
+    parte = conexion.obtener_parte2(serial_padre)
+    
+    if config_local and config_local != "FAILED":
+        machine_id = str(config_local[0]).strip()
+        operator_id = str(config_local[1]).strip()
+        process_name = str(config_local[3]).strip()
+        component_name_db = str(config_local[4]).strip()
+        program_version = str(config_local[2]).strip()
+    else:
+        machine_id = "AMC-GENLD97"
+        operator_id = "9999"
+        process_name = "Pressfit"
+        component_name_db = "component"
+        program_version = "default_program"
+
+    now = datetime.now(ZoneInfo("America/Mexico_City"))
+    now_utc = now.strftime("%d/%m/%Y %I:%M:%S %p")
+    fecha = str(parte[3])
+
+    # Convertir la cadena a datetime
+    fecha_dt = datetime.strptime(fecha, "%Y/%m/%d %H:%M:%S")
+
+    # Dar el formato deseado
+    fecha_formateada = fecha_dt.strftime("%d/%m/%Y %I:%M:%S %p")
+    
+    atributos = conexion.select_attributes_st50_80()
+    atributos_map = {}
+    for attr in atributos:
+        if len(attr) >= 7:
+            nombre_atributo = str(attr[1]).lower().strip() 
+            atributos_map[nombre_atributo] = {
+                'defect_code_low': str(attr[5]).strip() if attr[5] is not None else "",   
+                'defect_code_high': str(attr[6]).strip() if attr[6] is not None else "",  
+                'name': attr[1]
+            }
+
+    part_row = conexion.pieces(serial_padre)
+    all_test_rows = []
+    
+    if part_row:
+        part_id = part_row[0]
+        
+        try:
+            sr = conexion.screwing_data(part_id)
+            if sr and isinstance(sr, list):
+                for item in sr: all_test_rows.append(item + ('screwing',))
+        except Exception: pass
+        
+        try:
+            pr = conexion.pressfit_data(part_id)
+            if pr and isinstance(pr, list):
+                for item in pr: all_test_rows.append(item + ('pressfit',))
+        except Exception: pass
+        
+        try:
+            ir = conexion.inspection_data3(part_id)
+            if ir and isinstance(ir, list):
+                for item in ir: all_test_rows.append(item + ('inspection',))
+        except Exception: pass
+        
+        try:
+            er = conexion.electrical_data(part_id)
+            if er and isinstance(er, list):
+                for item in er: all_test_rows.append(item + ('electrical',))
+        except Exception: pass
+
+    steps_list = []
+    global_status = "PASSED"
+
+    for row in all_test_rows:
+        try:
+            test_source = str(row[-1]).strip().lower() if isinstance(row[-1], str) and row[-1] in ['screwing', 'pressfit', 'inspection', 'electrical'] else ""
+            
+            val_medido = float(row[1]) if row[1] is not None else 0.0
+            lim_inf = float(row[2]) if row[2] is not None else 0.0
+            lim_sup = float(row[3]) if row[3] is not None else 0.0
+            unidad = str(row[5]) if row[5] is not None else ""
+            status_step = str(row[6]).upper() if row[6] is not None else "PASSED"
+            name_step = str(row[9]) if row[9] is not None else "Measurement"
+            desc_step = str(row[9]) if row[9] is not None else "Description"
+            
+        except Exception:
+            continue
+
+        if status_step == "FAILED":
+            global_status = "FAILED"
+            
+            defect_code_low = defect_code_default
+            defect_code_high = defect_code_default
+            
+            source_to_attribute = {
+                'screwing': 'SCREWING',
+                'pressfit': 'PRESSFIT', 
+                'inspection': 'INSPECTION',  
+                'electrical': 'ELECTRICAL'
+            }
+            
+            attr_name = source_to_attribute.get(test_source, name_step.upper())
+            
+            if attr_name.lower() in atributos_map:
+                defect_code_low = atributos_map[attr_name.lower()]['defect_code_low']
+                defect_code_high = atributos_map[attr_name.lower()]['defect_code_high']
+            else:
+                if name_step.lower() in atributos_map:
+                    defect_code_low = atributos_map[name_step.lower()]['defect_code_low']
+                    defect_code_high = atributos_map[name_step.lower()]['defect_code_high']
+            
+            if val_medido < lim_inf:
+                step_defect = defect_code_low if defect_code_low else defect_code_default
+            elif val_medido > lim_sup:
+                step_defect = defect_code_high if defect_code_high else defect_code_default
+            else:
+                step_defect = defect_code_high if defect_code_high else (defect_code_low if defect_code_low else defect_code_default)
+        else:
+            step_defect = ""
+
+        steps_list.append({
+            "name": name_step,
+            "description": desc_step,
+            "comparator": "GELE",
+            "lowLimit": lim_inf,
+            "highLimit": lim_sup,
+            "units": unidad,
+            "status": status_step,
+            "value": val_medido,
+            "defect_code": step_defect
+        })
+
+    program_version = str(program_version).strip() if program_version else "default_program"
+
+    payload = {
+        "serial": serial_padre,
+        "product": parte[4],
+        "station": machine_id,
+        "operator": operator_id,
+        "start_time": fecha_formateada,
+        "end_time": now_utc,
+        "process_name": process_name,
+        "status": global_status,
+        "test_steps": {
+            "STEPS LIST": steps_list
+        },
+        "commands": [
+            {
+                "command": "ReplaceNontrackedComponent",
+                "ref_designator": f"{process_name}_Station ID",
+                "component_id": machine_id
+            },
+            {
+                "command": "ReplaceNontrackedComponent",
+                "ref_designator": f"{process_name}_Program ID",
+                "component_id": program_version   
+            }
+        ]
+    }
+
+    return payload
+
 # datos = traceability_station_60_v3("P1472635-61-G:SE4A22172000003", 4)
 # print(json.dumps(datos[0], indent=4))
 # print(datos[1])
