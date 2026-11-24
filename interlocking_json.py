@@ -402,9 +402,51 @@ def interlocking_st50_v2(top_level):
         },
     }
 
-    
     return interlocking_json
 
+def interlocking_st80_v2(top_level):
+    configurador = conexion.configuradorst50_v2()
+    piece_id = conexion.serial_number_component(top_level)
+    pcb = conexion.component_data(piece_id[0])
+
+    unit_information = []
+
+    machine_name    = configurador[0]          # machine_name
+    operator_id     = configurador[2]          # operator_id
+    program_name_version = configurador[4]     #program name 
+    process_name = configurador[6]             # process    
+
+    unit_information.append({
+            "name": "station_id",
+            "value": machine_name
+        })
+    unit_information.append({
+        "name": "program_name_version",
+        "value": program_name_version
+    })
+
+    for x in pcb:
+        valor = x[1]
+        unit_information.append({
+            "name": "drip_part_number",
+            "value": valor
+        })
+
+    interlocking_json = {
+        "serial": top_level,
+        "product": piece_id[2],
+        "station": machine_name,
+        "operator": operator_id,
+        "process_name": process_name,
+        "location": "",
+        "test_steps":{
+            "unit_information": unit_information,
+            
+        },
+    }
+
+    
+    return interlocking_json
 
 #def interlocking_st80_v2(parent_serial_number, parent_part_number, ):
 # interlocking_station_20("AABB-parent_serial_number","CCGG02-parent_part_number","ZZXX01-heater_part_number")
